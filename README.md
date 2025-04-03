@@ -1,80 +1,50 @@
-# Cuentos - AI Powered Storybooks for Children
+# Cuentos Personalizados
 
-Cuentos is a responsive web application that creates personalized children's storybooks using AI. The application generates unique stories and illustrations based on user preferences, allowing for a customized storytelling experience.
+Una aplicación web que genera cuentos infantiles personalizados con imágenes generadas por IA.
 
-## Features
+## Características
 
-- **User Input Form**: Capture child's name, preferred story theme, and illustration style
-- **AI-Generated Content**: Create unique stories using OpenAI's GPT-4o model
-- **AI-Generated Illustrations**: Generate matching illustrations for each page of the story
-- **PDF Generation**: Convert the generated content into downloadable PDF storybooks
-- **Responsive Design**: Works on desktop, tablet, and mobile devices
+- Generación de cuentos personalizados con el nombre del niño
+- Selección de temas y estilos de ilustración
+- Generación de imágenes con DALL-E 3
+- Vista previa de la portada y la primera página
+- Preparado para implementar pasarela de pago (en desarrollo)
 
-## Technologies Used
+## Tecnologías
 
-- **Frontend**: Next.js with React and TypeScript
-- **Styling**: Tailwind CSS
-- **AI Integration**: OpenAI API (GPT-4o)
-- **PDF Generation**: pdf-lib
+- Next.js
+- Tailwind CSS
+- OpenAI GPT-4o para generación de historias
+- DALL-E 3 para generación de imágenes
 
-## Getting Started
+## Configuración
 
-### Prerequisites
-
-- Node.js 18.0.0 or later
-- npm or yarn
-- OpenAI API key
-
-### Installation
-
-1. Clone the repository:
-
-   ```bash
-   git clone https://github.com/yourusername/cuentos.git
-   cd cuentos
-   ```
-
-2. Install dependencies:
-
+1. Clona este repositorio
+2. Instala las dependencias:
    ```bash
    npm install
    ```
-
-3. Create a `.env.local` file in the root directory and add your OpenAI API key:
+3. Crea un archivo `.env.local` en la raíz del proyecto con tu clave API de OpenAI:
    ```
-   NEXT_PUBLIC_OPENAI_API_KEY=your_openai_api_key
+   OPENAI_API_KEY=tu_clave_api_de_openai
    ```
+4. Inicia el servidor de desarrollo:
+   ```bash
+   npm run dev
+   ```
+5. Abre [http://localhost:3000](http://localhost:3000) en tu navegador
 
-### Running the Development Server
+## Estructura del Proyecto
 
-```bash
-npm run dev
-```
+- `app/page.js` - Página principal
+- `app/components/BookGenerationForm.js` - Formulario para la generación de cuentos
+- `app/api/story/generate/route.js` - API para generar historias con GPT-4o
+- `app/api/image/generate/route.js` - API para generar imágenes con DALL-E 3
+- `public/stories/` - Directorio donde se guardan las imágenes generadas
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the application.
+## Próximas Funcionalidades
 
-## Usage
-
-1. Enter the child's name
-2. Select a story theme (moral lessons, social skills, educational, fantasy)
-3. Choose an illustration style
-4. Click "Create My Storybook"
-5. Wait for the AI to generate content
-6. Preview the generated storybook
-7. Download as PDF
-
-## Future Enhancements
-
-- User accounts for saving generated stories
-- More customization options (age range, additional themes)
-- Audio narration of stories
-- Print-on-demand integration
-- Multiple children characters in the same story
-
-## License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
-
----
-
-This is an MVP (Minimum Viable Product) version of Cuentos. Future updates will include more features and improvements.
+- Integración de pasarela de pago (Bold.co / MercadoPago)
+- Panel de administración
+- Generación de PDF completo
+- Opción para imprimir libros físicos
