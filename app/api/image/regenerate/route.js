@@ -93,6 +93,16 @@ TEXT VISIBILITY REQUIREMENTS:
 - Text must NOT be positioned near edges or busy areas of the illustration
 `;
 
+// Text prohibition requirements for story pages
+const textProhibitionRequirements = `
+TEXT PROHIBITION REQUIREMENTS:
+- DO NOT include ANY text in the illustration whatsoever
+- NO words, labels, captions, speech bubbles, or text elements of any kind
+- DO NOT try to include the story text in the image
+- CREATE ONLY a text-free illustration that visually represents the scene
+- FOCUS COMPLETELY on creating a beautiful, clear illustration without any text elements
+`;
+
 // Add anti-POV/meta-representation requirements
 const antiMetaRepresentationRequirements = `
 CRITICAL FORMAT REQUIREMENTS:
@@ -121,16 +131,29 @@ function enhancePromptWithFeedback(basePrompt, feedback) {
   // Add specific instructions based on feedback type
   switch (feedback.type) {
     case "text_visibility":
-      enhancedPrompt += `
+      // Only add text visibility instructions for cover images
+      if (basePrompt.includes("titled")) {
+        enhancedPrompt += `
 
 CRITICAL TEXT READABILITY INSTRUCTIONS: 
-1. Make the text MUCH LARGER and CLEARLY VISIBLE with excellent contrast
+1. Make the title text MUCH LARGER and CLEARLY VISIBLE with excellent contrast
 2. Use a simple, highly legible font style
-3. Place text against a simplified, uncluttered background area
-4. Ensure text has a contrasting outline or shadow if needed for legibility
-5. Position text in the center or in a prominent area of the image
-6. Text must be perfectly readable at a glance
-7. Do NOT stylize the text to the point it becomes difficult to read`;
+3. Place title text against a simplified, uncluttered background area
+4. Ensure title text has a contrasting outline or shadow if needed for legibility
+5. Position title text in the center or in a prominent area of the image
+6. Title text must be perfectly readable at a glance
+7. Do NOT stylize the text to the point it becomes difficult to read
+8. ONLY the title text should be included - NO other text elements at all`;
+      } else {
+        // For story pages, reinforce no text
+        enhancedPrompt += `
+
+CRITICAL TEXT-FREE INSTRUCTIONS:
+1. Do NOT include ANY text in the image whatsoever
+2. Create a completely text-free illustration
+3. Remove all text elements including any words, labels, or captions
+4. Focus entirely on the visual illustration without any text`;
+      }
       break;
     case "character_appearance":
       enhancedPrompt += `
@@ -183,11 +206,21 @@ CRITICAL STYLE CONSISTENCY INSTRUCTIONS:
   }
 
   // Add quality verification checks
-  enhancedPrompt += `\n\nFINAL QUALITY CHECKS:
+  if (basePrompt.includes("titled")) {
+    // For cover page
+    enhancedPrompt += `\n\nFINAL QUALITY CHECKS:
 - Verify all characters have anatomically correct features
-- Ensure text is easily readable with proper contrast and sizing
+- Ensure ONLY the title text is included and is easily readable with proper contrast and sizing
 - Confirm this is a direct illustration, NOT a book photograph
 - Check that character appearance matches the reference exactly`;
+  } else {
+    // For story pages
+    enhancedPrompt += `\n\nFINAL QUALITY CHECKS:
+- Verify all characters have anatomically correct features
+- Ensure NO text is included anywhere in the illustration
+- Confirm this is a direct illustration, NOT a book photograph
+- Check that character appearance matches the reference exactly`;
+  }
 
   return enhancedPrompt;
 }
@@ -360,6 +393,11 @@ export async function POST(request) {
         if (nameMatch && nameMatch[1]) {
           characterName = nameMatch[1];
         }
+      } else if (title) {
+        const titleNameMatch = title.match(/([A-Z][a-z]+)/);
+        if (titleNameMatch && titleNameMatch[1]) {
+          characterName = titleNameMatch[1];
+        }
       }
 
       characterConsistencyPrompt = `
@@ -377,50 +415,90 @@ Maintain precise visual consistency with the reference image including:
 This is ABSOLUTELY CRITICAL for maintaining story continuity.`;
     } catch (error) {
       console.log(
-        `[${requestId}] ℹ️ No character profile found, proceeding without it`
+        `[${requestId}] ℹ️ No character profile found. Attempting to access other pages for character information...`
       );
+
+      // Attempt to find other pages to extract character description
+      try {
+        // Look for all page files in the directory
+        const files = await fs.readdir(bookDir);
+        const pageFiles = files.filter(
+          (file) => file.startsWith("page") && file.endsWith(".png")
+        );
+
+        if (pageFiles.length > 0) {
+          console.log(
+            `[${requestId}] ✅ Found ${pageFiles.length} page files to analyze for character consistency`
+          );
+
+          // Use either the pageData or the cover description for character info
+          let characterDescription = "";
+          if (pageData && pageData.imageDescription) {
+            characterDescription = pageData.imageDescription;
+          } else if (coverDescription) {
+            characterDescription = coverDescription;
+          }
+
+          if (characterDescription) {
+            characterConsistencyPrompt = `
+CRITICAL CHARACTER CONSISTENCY:
+The main character must look consistent with other story illustrations.
+Based on the story context:
+${characterDescription}
+
+Maintain consistent appearance, proportions, colors, and style with the other pages of the book.
+This is ABSOLUTELY CRITICAL for maintaining story continuity.`;
+          }
+        }
+      } catch (dirError) {
+        console.log(
+          `[${requestId}] ⚠️ Unable to analyze directory for character consistency: ${dirError.message}`
+        );
+      }
+    }
+
+    // If still no character prompt, create a basic one
+    if (
+      !characterConsistencyPrompt &&
+      (pageData?.imageDescription || coverDescription)
+    ) {
+      const description = pageData?.imageDescription || coverDescription;
+      characterConsistencyPrompt = `
+CRITICAL CHARACTER CONSISTENCY:
+The main character must look consistent across all illustrations.
+Based on the description:
+${description}
+
+Maintain consistent appearance, proportions, colors, and style. The character should be immediately recognizable as the same character from other illustrations in the book.`;
     }
 
     // Define style prompts based on the illustration style
     let stylePrompt = "";
-    let textStylePrompt = "";
 
     switch (illustrationStyle) {
       case "pixar-style":
         stylePrompt =
           "in Pixar 3D animation style, with vibrant colors and detailed textures. Maintain consistent character designs with the same proportions, features, and clothing styles throughout all illustrations.";
-        textStylePrompt =
-          "The text should be large, clear, and use a playful rounded sans-serif font with strong contrast against the background. Position text in areas with simple, uncluttered backgrounds for maximum readability.";
         break;
       case "disney-classic":
         stylePrompt =
           "in classic Disney animation style, with fluid lines and warm colors. Maintain consistent character designs with the same proportions, features, and clothing styles throughout all illustrations.";
-        textStylePrompt =
-          "The text should be elegant, clear, and use a classic storybook serif font with strong contrast against the background. Position text in areas with simple, uncluttered backgrounds for maximum readability.";
         break;
       case "hand-drawn-watercolor":
         stylePrompt =
           "in hand-drawn watercolor style, with soft brush strokes and translucent colors. Maintain consistent character designs with the same proportions, features, and clothing styles throughout all illustrations.";
-        textStylePrompt =
-          "The text should be hand-lettered, clear, and use a consistent calligraphic style with strong contrast against the background. Position text in areas with simple, uncluttered backgrounds for maximum readability.";
         break;
       case "cartoon-sketch":
         stylePrompt =
           "in cartoon sketch style, with bold outlines and flat colors. Maintain consistent character designs with the same proportions, features, and clothing styles throughout all illustrations.";
-        textStylePrompt =
-          "The text should be bold, clear, and use a comic-like font with strong contrast against the background. Position text in areas with simple, uncluttered backgrounds for maximum readability.";
         break;
       case "minimalist-modern":
         stylePrompt =
           "in minimalist modern style, with simple geometric shapes and solid colors. Maintain consistent character designs with the same proportions, features, and clothing styles throughout all illustrations.";
-        textStylePrompt =
-          "The text should be clean, clear, and use a modern sans-serif font with strong contrast against the background. Position text in areas with simple, uncluttered backgrounds for maximum readability.";
         break;
       default:
         stylePrompt =
           "in a colorful and child-friendly style. Maintain consistent character designs with the same proportions, features, and clothing styles throughout all illustrations.";
-        textStylePrompt =
-          "The text should be large, clear, and use a child-friendly font with strong contrast against the background. Position text in areas with simple, uncluttered backgrounds for maximum readability.";
     }
     console.log(`[${requestId}] 🎨 Illustration style prompt: ${stylePrompt}`);
 
@@ -433,17 +511,18 @@ This is ABSOLUTELY CRITICAL for maintaining story continuity.`;
 
 ${characterConsistencyPrompt}
 
-${textStylePrompt}
-
 ${textVisibilityRequirements}
 
 ${antiMetaRepresentationRequirements}
 
 ${anatomicalCorrectnessRequirements}
 
-IMPORTANT: Include ONLY the title "${title}" text artistically integrated into the image - no other text, labels, captions, or words should appear anywhere in the image. The title text must be easily readable with high contrast against the background. Position the text in an area with a simple background to ensure readability.
+CRITICAL REQUIREMENT: The title "${title}" MUST be included in LARGE, BOLD lettering artistically integrated into the image. The title text must be easily readable with high contrast against the background. Position the title text in an area with a simple background to ensure readability. NO OTHER TEXT should be included anywhere in the image.
 
-FINAL CHECK: Verify the character has anatomically correct features (exactly two arms, two hands, etc.) and appears EXACTLY as shown in the character profile. This must be a direct illustration, NOT a photograph of a book page.`;
+FINAL CHECK: 
+1. Verify the character has anatomically correct features (exactly two arms, two hands, etc.) and appears EXACTLY as shown in the character profile.
+2. Ensure the TITLE TEXT "${title}" is clearly visible and legible in the image.
+3. Confirm this is a direct illustration, NOT a photograph of a book page.`;
       fileName = "cover.png";
     } else {
       const pageNum = parseInt(pageIndex, 10);
@@ -451,9 +530,7 @@ FINAL CHECK: Verify the character has anatomically correct features (exactly two
 
 ${characterConsistencyPrompt}
 
-${textStylePrompt}
-
-${textVisibilityRequirements}
+${textProhibitionRequirements}
 
 ${antiMetaRepresentationRequirements}
 
@@ -461,9 +538,12 @@ ${anatomicalCorrectnessRequirements}
 
 ${pageData.imageDescription} 
 
-IMPORTANT: Include ONLY the following text artistically integrated into the image: "${pageData.content}". No other text, labels, captions, page numbers, or words should appear anywhere in the image. The exact text "${pageData.content}" must be easily readable with high contrast against the background. Text size must be LARGE (minimum 24pt equivalent). Position the text in an area with a simple, uncluttered background to ensure maximum readability.
+IMPORTANT: This must be a COMPLETELY TEXT-FREE illustration. DO NOT include ANY text, labels, captions, page numbers, speech bubbles, or words of any kind in the image. Create a beautiful, clean illustration that represents the scene described above. The illustration should not contain any words whatsoever.
 
-FINAL CHECK: Verify the character has anatomically correct features (exactly two arms, two hands, etc.) and appears EXACTLY as shown in the character profile. This must be a direct illustration of the page content, NOT a photograph or meta-representation of a book.`;
+FINAL CHECK: 
+1. Verify the character has anatomically correct features (exactly two arms, two hands, etc.) and appears EXACTLY as shown in other illustrations.
+2. Ensure NO TEXT is included anywhere in the illustration.
+3. Confirm this is a direct illustration of the page content, NOT a photograph or meta-representation of a book.`;
       fileName = `page${pageNum + 1}.png`;
     }
 
@@ -504,8 +584,8 @@ FINAL CHECK: Verify the character has anatomically correct features (exactly two
         const validationResult = await validateImageQuality(imageUrl, {
           type: isCover ? "cover" : "page",
           hasCharacter: characterConsistencyPrompt ? true : false,
-          hasText: true,
-          textContent: isCover ? title : pageData.content,
+          hasText: isCover, // Only cover should have text
+          textContent: isCover ? title : null, // No text content for story pages
         });
 
         if (validationResult.passed) {

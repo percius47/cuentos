@@ -94,6 +94,10 @@ export default function BookGenerationForm() {
           coverDescription: storyData.coverDescription,
           pages: storyData.pages,
           illustrationStyle: formData.illustrationStyle,
+          mainCharacter: formData.childName,
+          theme: formData.theme,
+          language: formData.language,
+          ageRange: formData.age,
         }),
       });
 
