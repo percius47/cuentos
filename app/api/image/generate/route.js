@@ -1,6 +1,12 @@
 import OpenAI from "openai";
 import { promises as fs } from "fs";
 import path from "path";
+import {
+  createCharacterProfilePrompt,
+  formatConsistentCharacterPrompt,
+  createCoverImagePrompt,
+  createPageImagePrompt,
+} from "../../../utils/characterConsistency";
 
 // Initialize the OpenAI client
 const openai = new OpenAI({
@@ -10,6 +16,125 @@ const openai = new OpenAI({
 // Rate limiting constants for DALL-E 3
 const BATCH_SIZE = 5; // Maximum images per batch
 const BATCH_DELAY = 62000; // Wait ~62 seconds between batches (just over 1 minute)
+
+// Add a helper function for retrying image generation
+async function generateImageWithRetry(requestId, prompt, maxRetries = 2) {
+  let attempt = 0;
+  let error;
+
+  while (attempt < maxRetries) {
+    attempt++;
+    try {
+      console.log(
+        `[${requestId}] Attempt ${attempt}/${maxRetries} for image generation`
+      );
+
+      const response = await openai.images.generate({
+        model: "dall-e-3",
+        prompt: prompt,
+        n: 1,
+        size: "1024x1024",
+      });
+
+      return response.data[0].url;
+    } catch (err) {
+      error = err;
+      console.error(
+        `[${requestId}] ❌ Attempt ${attempt} failed: ${err.message}`
+      );
+
+      // If we have more attempts, wait before retrying
+      if (attempt < maxRetries) {
+        const delay = 3000 * attempt; // Progressive backoff
+        console.log(
+          `[${requestId}] Waiting ${delay / 1000} seconds before retry...`
+        );
+        await new Promise((resolve) => setTimeout(resolve, delay));
+      }
+    }
+  }
+
+  // If we get here, all attempts failed
+  throw error || new Error("Failed to generate image after multiple attempts");
+}
+
+// Add a helper function for downloading images with retry
+async function downloadImageWithRetry(
+  requestId,
+  imageUrl,
+  outputPath,
+  maxRetries = 3
+) {
+  let attempt = 0;
+  let error;
+
+  while (attempt < maxRetries) {
+    attempt++;
+    try {
+      console.log(`[${requestId}] Download attempt ${attempt}/${maxRetries}`);
+
+      const response = await fetch(imageUrl);
+      if (!response.ok) throw new Error(`HTTP error: ${response.status}`);
+
+      const imageBuffer = Buffer.from(await response.arrayBuffer());
+      await fs.writeFile(outputPath, imageBuffer);
+
+      return true;
+    } catch (err) {
+      error = err;
+      console.error(
+        `[${requestId}] ❌ Download attempt ${attempt} failed: ${err.message}`
+      );
+
+      if (attempt < maxRetries) {
+        const delay = 2000 * attempt; // Progressive backoff
+        console.log(
+          `[${requestId}] Waiting ${delay / 1000} seconds before retry...`
+        );
+        await new Promise((resolve) => setTimeout(resolve, delay));
+      }
+    }
+  }
+
+  throw error || new Error("Failed to download image after multiple attempts");
+}
+
+// Helper function to save generation progress
+async function saveGenerationProgress(bookDir, progress) {
+  try {
+    const progressPath = path.join(bookDir, "generation_progress.json");
+    await fs.writeFile(
+      progressPath,
+      JSON.stringify(
+        {
+          ...progress,
+          lastUpdated: new Date().toISOString(),
+        },
+        null,
+        2
+      )
+    );
+  } catch (error) {
+    console.error("Error saving generation progress:", error);
+    // Non-critical error, can continue without it
+  }
+}
+
+// Helper function to check existing generation progress
+async function checkExistingProgress(bookDir) {
+  try {
+    const progressPath = path.join(bookDir, "generation_progress.json");
+    const progressData = await fs.readFile(progressPath, "utf8");
+    return JSON.parse(progressData);
+  } catch (error) {
+    // File doesn't exist or can't be read, return default progress
+    return {
+      coverGenerated: false,
+      pagesGenerated: [],
+      failedPages: [],
+    };
+  }
+}
 
 export async function POST(request) {
   const requestId = Date.now().toString(36);
@@ -64,15 +189,7 @@ export async function POST(request) {
     // Step 1: Generate a detailed character profile using GPT-4o
     console.log(`[${requestId}] 👤 Generating detailed character profile...`);
 
-    const characterPrompt = `Create a detailed character profile for a children's book protagonist named ${mainCharacter}. 
-    Include specific, consistent details about:
-    1. Physical appearance (age, height, hair color and style, eye color, skin tone, distinctive features)
-    2. Clothing and accessories (colors, style, unique items)
-    3. Personality traits that might be reflected visually
-    4. Any other visual elements that should remain consistent across illustrations
-    
-    Use a structured format with clear categories that can be easily referenced for consistency across multiple illustrations. 
-    Be very specific about each physical characteristic to ensure visual consistency.`;
+    const characterPrompt = createCharacterProfilePrompt(mainCharacter);
 
     const characterResponse = await openai.chat.completions.create({
       model: "gpt-4o",
@@ -119,7 +236,7 @@ export async function POST(request) {
           // Pages 2-8 following the same structure
         ]
       }
-      Make sure character visual details stay consistent with the profile. The illustrations should be visually rich and varied from page to page.`;
+      Make sure character visual details stay consistent with the profile. The illustrations should be visually rich and varied from page to page. IMAGE SHOULD ABSOLUTELY NOT CONTAIN ANY TEXT.`;
 
       const storyResponse = await openai.chat.completions.create({
         model: "gpt-4o",
@@ -185,160 +302,261 @@ export async function POST(request) {
           "in a colorful and child-friendly illustration style";
     }
 
-    // Generate cover image without any text
-    console.log(`[${requestId}] 🖼️ Generating cover image...`);
-
-    const coverPrompt = `Create a front cover illustration for a children's book titled "${title}", ${styleDescription}.
-${storyData.coverDescription}
-
-Character Profile details to maintain consistently:
-${characterProfile}
-
-CRITICAL REQUIREMENTS:
-1. Do NOT include ANY text in the illustration that visually represents the story theme
-2. NO words, lettering, labels, or text elements of any kind should appear
-3. Create a direct illustration, NOT a photograph or meta-representation of a book
-5. Maintain character consistency by strictly following these details:
-   - Character name: ${mainCharacter}
-   - All physical characteristics - age, height, hair, eyes, skin, etc. including all clothing and accessories exactly as described in the Character profile`;
-
-    const coverImageResponse = await openai.images.generate({
-      model: "dall-e-3",
-      prompt: coverPrompt,
-      n: 1,
-      size: "1024x1024",
-    });
-
-    const coverImageUrl = coverImageResponse.data[0].url;
-
-    // Download the cover image
-    const coverImageResponse2 = await fetch(coverImageUrl);
-    const coverImageBuffer = Buffer.from(
-      await coverImageResponse2.arrayBuffer()
+    // Check if we have any existing progress
+    const existingProgress = await checkExistingProgress(bookDir);
+    console.log(
+      `[${requestId}] 🔍 Checking for existing generation progress...`
     );
-    const coverImagePath = path.join(bookDir, "cover.png");
-    await fs.writeFile(coverImagePath, coverImageBuffer);
 
-    console.log(`[${requestId}] ✅ Cover image created and saved`);
+    // Generate cover image if not already generated
+    if (!existingProgress.coverGenerated) {
+      console.log(`[${requestId}] 🖼️ Generating cover image...`);
+
+      // Use the utility function to create a consistent character prompt
+      const consistentCharacterPrompt =
+        formatConsistentCharacterPrompt(characterProfile);
+
+      // Create cover image prompt using the utility function
+      const coverPrompt = createCoverImagePrompt(
+        title,
+        storyData.coverDescription,
+        characterProfile,
+        styleDescription,
+        mainCharacter
+      );
+
+      try {
+        // Generate the cover image with retry logic
+        const coverImageUrl = await generateImageWithRetry(
+          requestId,
+          coverPrompt
+        );
+
+        // Download the cover image with retry logic
+        const coverImagePath = path.join(bookDir, "cover.png");
+        await downloadImageWithRetry(requestId, coverImageUrl, coverImagePath);
+
+        console.log(`[${requestId}] ✅ Cover image created and saved`);
+
+        // Update progress
+        existingProgress.coverGenerated = true;
+        await saveGenerationProgress(bookDir, existingProgress);
+      } catch (coverError) {
+        console.error(
+          `[${requestId}] ❌ Failed to generate cover image: ${coverError.message}`
+        );
+        return Response.json(
+          { error: "Failed to generate cover image" },
+          { status: 500 }
+        );
+      }
+    } else {
+      console.log(`[${requestId}] ℹ️ Cover image already generated, skipping`);
+    }
 
     // Generate illustrations for each page
     console.log(`[${requestId}] 📚 Generating page illustrations...`);
 
     const pageUrls = [];
 
-    // FOR NOW: Generate only the first page image
-    // In the future, this will be updated to generate all pages
+    // Generate all story pages in batches to respect rate limits
     console.log(
-      `[${requestId}] ℹ️ Currently generating only the first page image`
+      `[${requestId}] 🖼️ Generating all ${storyData.pages.length} page illustrations...`
     );
 
-    if (storyData.pages.length > 0) {
-      const page = storyData.pages[0];
+    // Track generation progress
+    const generationResults = {
+      total: storyData.pages.length,
+      successful: existingProgress.pagesGenerated.length || 0,
+      failed: 0,
+      failedPages: [...(existingProgress.failedPages || [])],
+      pagesGenerated: [...(existingProgress.pagesGenerated || [])],
+    };
 
-      const pagePrompt = `Create an illustration for page 1 of a children's story-book ${styleDescription}.
-
-Scene description:
-${page.imageDescription}
-
-Character Profile details to maintain consistently:
-${characterProfile}
-
-CRITICAL REQUIREMENTS:
-1. Do NOT include ANY text in the illustration that visually represents the story theme
-2. NO words, lettering, labels, or text elements of any kind should appear
-3. Create a direct illustration, NOT a photograph or meta-representation of a book
-5. Maintain character consistency by strictly following these details:
-   - Character name: ${mainCharacter}
-   - All physical characteristics - age, height, hair, eyes, skin, etc. including all clothing and accessories exactly as described in the Character profile`;
-
-      console.log(`[${requestId}] 🖌️ Generating illustration for page 1...`);
-
-      try {
-        const pageImageResponse = await openai.images.generate({
-          model: "dall-e-3",
-          prompt: pagePrompt,
-          n: 1,
-          size: "1024x1024",
-        });
-
-        const pageImageUrl = pageImageResponse.data[0].url;
-
-        // Download the page image
-        const pageImageResponse2 = await fetch(pageImageUrl);
-        const pageImageBuffer = Buffer.from(
-          await pageImageResponse2.arrayBuffer()
-        );
-        const pageImagePath = path.join(bookDir, `page1.png`);
-        await fs.writeFile(pageImagePath, pageImageBuffer);
-
-        pageUrls.push(`/stories/${folderName}/page1.png`);
-        console.log(`[${requestId}] ✅ Page 1 illustration created and saved`);
-      } catch (error) {
-        console.error(
-          `[${requestId}] ❌ Error generating page 1:`,
-          error.message
-        );
+    // Create a list of pages that still need to be generated
+    const pagesToGenerate = [];
+    for (let i = 0; i < storyData.pages.length; i++) {
+      const pageNum = i + 1;
+      if (!generationResults.pagesGenerated.includes(pageNum)) {
+        pagesToGenerate.push(i);
       }
     }
 
-    /* FUTURE IMPLEMENTATION: Process all pages in batches to respect rate limits
-    for (let i = 0; i < storyData.pages.length; i++) {
-      const page = storyData.pages[i];
-      
+    console.log(
+      `[${requestId}] ℹ️ ${pagesToGenerate.length} pages need to be generated, ${generationResults.successful} already exist`
+    );
+
+    for (let i = 0; i < pagesToGenerate.length; i++) {
+      const pageIndex = pagesToGenerate[i];
+      const pageNum = pageIndex + 1;
+      const page = storyData.pages[pageIndex];
+
       // Add rate limiting delay between batches
       if (i > 0 && i % BATCH_SIZE === 0) {
-        console.log(`[${requestId}] ⏱️ Rate limit pause - waiting 62 seconds before continuing...`);
-        await new Promise(resolve => setTimeout(resolve, BATCH_DELAY));
+        console.log(
+          `[${requestId}] ⏱️ Rate limit pause - waiting ${
+            BATCH_DELAY / 1000
+          } seconds before continuing...`
+        );
+        await new Promise((resolve) => setTimeout(resolve, BATCH_DELAY));
       }
-      
-      const pagePrompt = `Create an illustration for page ${i+1} of a children's book ${styleDescription}.
 
-Scene description:
-${page.imageDescription}
+      // Create page illustration prompt using the utility function
+      const pagePrompt = createPageImagePrompt(
+        pageNum,
+        page.imageDescription,
+        characterProfile,
+        styleDescription,
+        mainCharacter
+      );
 
-Character Profile details to maintain consistently:
-${characterProfile}
+      console.log(
+        `[${requestId}] 🖌️ Generating illustration for page ${pageNum}/${
+          storyData.pages.length
+        } (${Math.round(
+          ((i + 1) / pagesToGenerate.length) * 100
+        )}% complete)...`
+      );
 
-CRITICAL REQUIREMENTS:
-1. Do NOT include ANY TEXT in the illustration - ABSOLUTELY NO TEXT
-2. Create ONLY a text-free illustration that visually represents the scene
-3. NO words, letters, numbers, labels, speech bubbles or text elements of any kind
-4. Create a direct illustration, NOT a photograph or meta-representation of a book
-5. The story text will be added separately later - do not try to include it
-6. Maintain character consistency by strictly following these details:
-   - Character name: ${mainCharacter} 
-   - All physical characteristics exactly as described in the profile (age, height, hair, eyes, skin, etc.)
-   - All clothing and accessories exactly as described in the profile`;
-
-      console.log(`[${requestId}] 🖌️ Generating illustration for page ${i+1}...`);
-      
       try {
-        const pageImageResponse = await openai.images.generate({
-          model: "dall-e-3",
-          prompt: pagePrompt,
-          n: 1,
-          size: "1024x1024",
-        });
-        
-        const pageImageUrl = pageImageResponse.data[0].url;
-        
-        // Download the page image
-        const pageImageResponse2 = await fetch(pageImageUrl);
-        const pageImageBuffer = Buffer.from(await pageImageResponse2.arrayBuffer());
-        const pageImagePath = path.join(bookDir, `page${i+1}.png`);
-        await fs.writeFile(pageImagePath, pageImageBuffer);
-        
-        pageUrls.push(`/stories/${folderName}/page${i+1}.png`);
-        console.log(`[${requestId}] ✅ Page ${i+1} illustration created and saved`);
+        // Generate the page image with retry logic
+        const pageImageUrl = await generateImageWithRetry(
+          requestId,
+          pagePrompt
+        );
+
+        // Download the page image with retry logic
+        const pageImagePath = path.join(bookDir, `page${pageNum}.png`);
+        await downloadImageWithRetry(requestId, pageImageUrl, pageImagePath);
+
+        pageUrls.push(`/stories/${folderName}/page${pageNum}.png`);
+        console.log(
+          `[${requestId}] ✅ Page ${pageNum} illustration created and saved`
+        );
+
+        // Update generation results
+        generationResults.successful++;
+        generationResults.pagesGenerated.push(pageNum);
+
+        // Save progress after each successful generation
+        await saveGenerationProgress(bookDir, generationResults);
       } catch (error) {
-        console.error(`[${requestId}] ❌ Error generating page ${i+1}:`, error.message);
+        console.error(
+          `[${requestId}] ❌ Error generating page ${pageNum}:`,
+          error.message
+        );
+        generationResults.failed++;
+        generationResults.failedPages.push(pageNum);
+
+        // Save progress after each failed generation
+        await saveGenerationProgress(bookDir, generationResults);
         // Continue with other pages even if one fails
       }
     }
-    */
+
+    // Add already generated pages to pageUrls
+    for (const pageNum of existingProgress.pagesGenerated) {
+      if (!pageUrls.includes(`/stories/${folderName}/page${pageNum}.png`)) {
+        pageUrls.push(`/stories/${folderName}/page${pageNum}.png`);
+      }
+    }
+
+    // Log generation summary
+    console.log(
+      `[${requestId}] 📊 Generation summary: ${generationResults.successful}/${generationResults.total} pages successful`
+    );
+    if (generationResults.failedPages.length > 0) {
+      console.log(
+        `[${requestId}] ⚠️ Failed pages: ${generationResults.failedPages.join(
+          ", "
+        )}`
+      );
+    }
+
+    // Check if we need to retry any failed pages
+    if (
+      generationResults.failedPages.length > 0 &&
+      generationResults.failedPages.length < generationResults.total
+    ) {
+      console.log(
+        `[${requestId}] 🔄 Attempting to regenerate ${generationResults.failedPages.length} failed pages...`
+      );
+
+      // Wait a bit before retrying to avoid rate limits
+      console.log(
+        `[${requestId}] ⏱️ Waiting 65 seconds before retrying failed pages...`
+      );
+      await new Promise((resolve) => setTimeout(resolve, 65000));
+
+      // Try to regenerate each failed page
+      for (const pageNum of generationResults.failedPages) {
+        const pageIndex = pageNum - 1;
+        const page = storyData.pages[pageIndex];
+
+        console.log(`[${requestId}] 🔄 Regenerating page ${pageNum}...`);
+
+        // Create a simplified prompt for the retry
+        const retryPrompt = `Create an illustration for page ${pageNum} of a children's story-book ${styleDescription}.
+
+Scene description:
+${page.imageDescription}
+
+${consistentCharacterPrompt}
+
+CRITICAL REQUIREMENTS:
+1. Do NOT include ANY text in the illustration
+2. NO words, letters, labels, or text elements of any kind
+3. Create a direct illustration of the scene described above
+4. Character must be consistent with the description`;
+
+        try {
+          // Try with simplified prompt
+          const pageImageUrl = await generateImageWithRetry(
+            requestId,
+            retryPrompt,
+            1
+          );
+
+          // Download the page image
+          const pageImagePath = path.join(bookDir, `page${pageNum}.png`);
+          await downloadImageWithRetry(requestId, pageImageUrl, pageImagePath);
+
+          // Add to page URLs if not already there
+          if (!pageUrls.includes(`/stories/${folderName}/page${pageNum}.png`)) {
+            pageUrls.push(`/stories/${folderName}/page${pageNum}.png`);
+          }
+
+          console.log(
+            `[${requestId}] ✅ Retry successful: Page ${pageNum} illustration created and saved`
+          );
+
+          // Update generation results
+          generationResults.successful++;
+          generationResults.failedPages = generationResults.failedPages.filter(
+            (p) => p !== pageNum
+          );
+          generationResults.pagesGenerated.push(pageNum);
+
+          // Save updated progress
+          await saveGenerationProgress(bookDir, generationResults);
+        } catch (retryError) {
+          console.error(
+            `[${requestId}] ❌ Final retry failed for page ${pageNum}:`,
+            retryError.message
+          );
+        }
+      }
+    }
+
+    // Sort pageUrls numerically
+    pageUrls.sort((a, b) => {
+      const aNum = parseInt(a.match(/page(\d+)\.png/)?.[1] || "0");
+      const bNum = parseInt(b.match(/page(\d+)\.png/)?.[1] || "0");
+      return aNum - bNum;
+    });
 
     console.log(
-      `[${requestId}] 🎉 Story and illustration generation complete!`
+      `[${requestId}] 🎉 Story and illustration generation complete! ${generationResults.successful}/${generationResults.total} pages successfully generated.`
     );
 
     // Return the results including all story data for future use
@@ -356,7 +574,9 @@ CRITICAL REQUIREMENTS:
         ...storyData,
         characterProfile,
       },
-      allPagesGenerated: false, // Flag indicating not all pages were generated
+      allPagesGenerated:
+        generationResults.successful === generationResults.total,
+      generationSummary: generationResults,
     });
   } catch (error) {
     console.error(`[${requestId}] ❌ Error:`, error);

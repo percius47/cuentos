@@ -1,6 +1,11 @@
 import OpenAI from "openai";
 import { promises as fs } from "fs";
 import path from "path";
+import {
+  formatConsistentCharacterPrompt,
+  createCoverImagePrompt,
+  createPageImagePrompt,
+} from "../../../utils/characterConsistency";
 
 // Initialize the OpenAI client
 const openai = new OpenAI({
@@ -304,6 +309,24 @@ function trimPromptToLimit(prompt, maxLength = MAX_PROMPT_LENGTH) {
   return trimmedPrompt.trim();
 }
 
+// Helper function to define style based on illustration style
+function defineStyle(illustrationStyle) {
+  switch (illustrationStyle) {
+    case "pixar-style":
+      return "in Pixar 3D animation style, with vibrant colors and detailed textures";
+    case "disney-classic":
+      return "in classic Disney animation style, with fluid lines and warm colors";
+    case "hand-drawn-watercolor":
+      return "in hand-drawn watercolor style, with soft brush strokes and translucent colors";
+    case "cartoon-sketch":
+      return "in cartoon sketch style, with bold outlines and flat colors";
+    case "minimalist-modern":
+      return "in minimalist modern style, with simple geometric shapes and solid colors";
+    default:
+      return "in a colorful and child-friendly illustration style";
+  }
+}
+
 export async function POST(request) {
   const requestId =
     Date.now().toString(36) + Math.random().toString(36).substr(2);
@@ -316,7 +339,7 @@ export async function POST(request) {
       feedback,
       title,
       coverDescription,
-      pageData,
+      pageData: requestPageData,
       illustrationStyle,
     } = await request.json();
 
@@ -344,7 +367,7 @@ export async function POST(request) {
       return Response.json({ error: "Missing cover data" }, { status: 400 });
     }
 
-    if (!isCover && !pageData) {
+    if (!isCover && !requestPageData) {
       console.log(`[${requestId}] ❌ Error: Missing page data`);
       return Response.json({ error: "Missing page data" }, { status: 400 });
     }
@@ -374,45 +397,25 @@ export async function POST(request) {
       );
     }
 
-    // Check if a character profile exists to ensure consistency
-    let characterConsistencyPrompt = "";
-    try {
-      const characterProfilePath = path.join(bookDir, "character_profile.png");
-      await fs.access(characterProfilePath);
+    // Generate the image
+    let rawPrompt;
+    let fileName;
+    let currentPageData;
+    let consistentCharacterPrompt = "";
+    let storyData;
 
-      console.log(
-        `[${requestId}] ✅ Character profile found, will be used for consistency`
+    // Load the story data
+    try {
+      storyData = JSON.parse(
+        await fs.readFile(path.join(bookDir, "story.json"), "utf8")
       );
 
-      // Extract character name from the file path or pageData
-      let characterName = "";
-      if (pageData && pageData.content) {
-        const nameMatch = pageData.content.match(
-          /([A-Z][a-z]+)(?:\s+(?:is|was|the))/
-        );
-        if (nameMatch && nameMatch[1]) {
-          characterName = nameMatch[1];
-        }
-      } else if (title) {
-        const titleNameMatch = title.match(/([A-Z][a-z]+)/);
-        if (titleNameMatch && titleNameMatch[1]) {
-          characterName = titleNameMatch[1];
-        }
-      }
+      // Get the character profile from the story data
+      const characterProfile = storyData.characterProfile || "";
 
-      characterConsistencyPrompt = `
-CRITICAL CHARACTER CONSISTENCY:
-The main character ${
-        characterName || "protagonist"
-      } must look EXACTLY as shown in the character profile. 
-Maintain precise visual consistency with the reference image including:
-- Identical facial features and expressions
-- Same hair style, color, and length
-- Identical clothing and accessories
-- Consistent body proportions
-- Same color scheme for all character elements
-
-This is ABSOLUTELY CRITICAL for maintaining story continuity.`;
+      // Create structured character prompt for consistency using utility function
+      consistentCharacterPrompt =
+        formatConsistentCharacterPrompt(characterProfile);
     } catch (error) {
       console.log(
         `[${requestId}] ℹ️ No character profile found. Attempting to access other pages for character information...`
@@ -433,14 +436,14 @@ This is ABSOLUTELY CRITICAL for maintaining story continuity.`;
 
           // Use either the pageData or the cover description for character info
           let characterDescription = "";
-          if (pageData && pageData.imageDescription) {
-            characterDescription = pageData.imageDescription;
+          if (requestPageData && requestPageData.imageDescription) {
+            characterDescription = requestPageData.imageDescription;
           } else if (coverDescription) {
             characterDescription = coverDescription;
           }
 
           if (characterDescription) {
-            characterConsistencyPrompt = `
+            consistentCharacterPrompt = `
 CRITICAL CHARACTER CONSISTENCY:
 The main character must look consistent with other story illustrations.
 Based on the story context:
@@ -459,11 +462,11 @@ This is ABSOLUTELY CRITICAL for maintaining story continuity.`;
 
     // If still no character prompt, create a basic one
     if (
-      !characterConsistencyPrompt &&
-      (pageData?.imageDescription || coverDescription)
+      !consistentCharacterPrompt &&
+      (requestPageData?.imageDescription || coverDescription)
     ) {
-      const description = pageData?.imageDescription || coverDescription;
-      characterConsistencyPrompt = `
+      const description = requestPageData?.imageDescription || coverDescription;
+      consistentCharacterPrompt = `
 CRITICAL CHARACTER CONSISTENCY:
 The main character must look consistent across all illustrations.
 Based on the description:
@@ -503,51 +506,105 @@ Maintain consistent appearance, proportions, colors, and style. The character sh
     console.log(`[${requestId}] 🎨 Illustration style prompt: ${stylePrompt}`);
 
     // Generate the image
-    let rawPrompt;
-    let fileName;
-
     if (isCover) {
-      rawPrompt = `Illustration for a children's book titled "${title}". ${coverDescription}. The illustration should be ${stylePrompt}
+      // Define style based on selected illustration style
+      let styleDescription = defineStyle(illustrationStyle);
 
-${characterConsistencyPrompt}
+      // If we have storyData from earlier
+      if (storyData) {
+        const mainCharacter = storyData.mainCharacter || "protagonist";
+        const characterProfile = storyData.characterProfile || "";
 
-${textVisibilityRequirements}
+        // Use utility function to create cover prompt
+        const coverPrompt = createCoverImagePrompt(
+          title,
+          storyData.coverDescription || coverDescription,
+          characterProfile,
+          styleDescription,
+          mainCharacter,
+          feedback?.details || ""
+        );
 
-${antiMetaRepresentationRequirements}
+        rawPrompt = coverPrompt;
+      } else {
+        // Fallback if storyData is not available
+        rawPrompt = `Create a front cover illustration for a children's book titled "${title}", ${styleDescription}.
+${coverDescription}
 
-${anatomicalCorrectnessRequirements}
+${consistentCharacterPrompt}
 
-CRITICAL REQUIREMENT: The title "${title}" MUST be included in LARGE, BOLD lettering artistically integrated into the image. The title text must be easily readable with high contrast against the background. Position the title text in an area with a simple background to ensure readability. NO OTHER TEXT should be included anywhere in the image.
+CRITICAL REQUIREMENTS:
+1. Do NOT include ANY text in the illustration
+2. NO words, lettering, labels, or text elements of any kind should appear
+3. Create a direct illustration, NOT a photograph or meta-representation of a book
+4. Character must be rendered with 100% consistency to the profile above
+${
+  feedback?.details
+    ? `\nADDITIONAL FEEDBACK TO ADDRESS:\n${feedback.details}`
+    : ""
+}`;
+      }
 
-FINAL CHECK: 
-1. Verify the character has anatomically correct features (exactly two arms, two hands, etc.) and appears EXACTLY as shown in the character profile.
-2. Ensure the TITLE TEXT "${title}" is clearly visible and legible in the image.
-3. Confirm this is a direct illustration, NOT a photograph of a book page.`;
       fileName = "cover.png";
-    } else {
-      const pageNum = parseInt(pageIndex, 10);
-      rawPrompt = `Illustration for a children's book ${stylePrompt}
+    } else if (
+      pageIndex >= 0 &&
+      storyData &&
+      storyData.pages &&
+      pageIndex < storyData.pages.length
+    ) {
+      const page = storyData.pages[pageIndex];
+      currentPageData = page;
 
-${characterConsistencyPrompt}
+      // Define style based on selected illustration style
+      let styleDescription = defineStyle(illustrationStyle);
+      const mainCharacter = storyData.mainCharacter || "protagonist";
+      const characterProfile = storyData.characterProfile || "";
 
-${textProhibitionRequirements}
+      // Use utility function to create page prompt
+      const pagePrompt = createPageImagePrompt(
+        parseInt(pageIndex) + 1,
+        page.imageDescription,
+        characterProfile,
+        styleDescription,
+        mainCharacter,
+        feedback?.details || ""
+      );
 
-${antiMetaRepresentationRequirements}
+      rawPrompt = pagePrompt;
+      fileName = `page${parseInt(pageIndex) + 1}.png`;
+    } else if (requestPageData) {
+      // Fallback if we don't have storyData but have pageData
+      const styleDescription = defineStyle(illustrationStyle);
 
-${anatomicalCorrectnessRequirements}
+      rawPrompt = `Create an illustration for a children's story-book ${styleDescription}.
 
-${pageData.imageDescription} 
+Scene description:
+${requestPageData.imageDescription}
 
-IMPORTANT: This must be a COMPLETELY TEXT-FREE illustration. DO NOT include ANY text, labels, captions, page numbers, speech bubbles, or words of any kind in the image. Create a beautiful, clean illustration that represents the scene described above. The illustration should not contain any words whatsoever.
+${consistentCharacterPrompt}
 
-FINAL CHECK: 
-1. Verify the character has anatomically correct features (exactly two arms, two hands, etc.) and appears EXACTLY as shown in other illustrations.
-2. Ensure NO TEXT is included anywhere in the illustration.
-3. Confirm this is a direct illustration of the page content, NOT a photograph or meta-representation of a book.`;
-      fileName = `page${pageNum + 1}.png`;
+CRITICAL REQUIREMENTS:
+1. Do NOT include ANY text in the illustration
+2. NO words, lettering, labels, or text elements of any kind should appear
+3. Create a direct illustration, NOT a photograph or meta-representation of a book
+4. Character must match EXACTLY the description above with no deviations
+${
+  feedback?.details
+    ? `\nADDITIONAL FEEDBACK TO ADDRESS:\n${feedback.details}`
+    : ""
+}`;
+
+      fileName = `page${parseInt(pageIndex) + 1}.png`;
     }
 
     // Enhance the prompt with feedback
+    if (!rawPrompt) {
+      return Response.json(
+        { error: "Failed to generate prompt for the image" },
+        { status: 500 }
+      );
+    }
+
     const enhancedPrompt = enhancePromptWithFeedback(rawPrompt, feedback);
     // Trim the enhanced prompt to acceptable length
     const trimmedPrompt = trimPromptToLimit(enhancedPrompt);
@@ -583,7 +640,7 @@ FINAL CHECK:
         // Validate the generated image
         const validationResult = await validateImageQuality(imageUrl, {
           type: isCover ? "cover" : "page",
-          hasCharacter: characterConsistencyPrompt ? true : false,
+          hasCharacter: consistentCharacterPrompt ? true : false,
           hasText: isCover, // Only cover should have text
           textContent: isCover ? title : null, // No text content for story pages
         });

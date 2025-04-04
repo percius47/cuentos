@@ -21,6 +21,8 @@ export default function StoryViewer({ storyData }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [downloadingPdf, setDownloadingPdf] = useState(false);
+  const [showFullStory, setShowFullStory] = useState(false);
+  const [purchaseLoading, setPurchaseLoading] = useState(false);
 
   // Apply font styles once when component loads
   useEffect(() => {
@@ -127,6 +129,17 @@ export default function StoryViewer({ storyData }) {
 
   const handleCancelRefine = () => {
     setRefiningPage(null);
+  };
+
+  // Handle purchase button click
+  const handlePurchase = () => {
+    setPurchaseLoading(true);
+
+    // Simulate a 4-second loading time before showing full story
+    setTimeout(() => {
+      setPurchaseLoading(false);
+      setShowFullStory(true);
+    }, 4000);
   };
 
   // Function to download the storybook as PDF
@@ -587,6 +600,33 @@ export default function StoryViewer({ storyData }) {
     boxShadow: "0 2px 4px rgba(0, 0, 0, 0.1)",
   };
 
+  const purchaseButtonStyle = {
+    backgroundColor: "#f6aa1d", // Amber
+    color: "#3e253d", // Dark purple
+    border: "none",
+    padding: "1rem 2rem",
+    borderRadius: "0.5rem",
+    fontWeight: "bold",
+    fontSize: "1.25rem",
+    cursor: purchaseLoading ? "not-allowed" : "pointer",
+    display: "block",
+    margin: "2rem auto",
+    boxShadow: "0 4px 6px rgba(0, 0, 0, 0.1)",
+    transition: "all 0.2s ease",
+  };
+
+  const purchaseContainerStyle = {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    padding: "2rem",
+    margin: "2rem 0",
+    backgroundColor: "#ffe2b9",
+    border: "2px dashed #3e253d",
+    borderRadius: "0.5rem",
+    textAlign: "center",
+  };
+
   return (
     <div style={containerStyle}>
       {loading && (
@@ -620,6 +660,41 @@ export default function StoryViewer({ storyData }) {
               </svg>
             </div>
             <p>Regenerating image...</p>
+          </div>
+        </div>
+      )}
+
+      {purchaseLoading && (
+        <div style={loadingOverlayStyle}>
+          <div style={{ color: "white", textAlign: "center" }}>
+            <div style={{ marginBottom: "1rem" }}>
+              <svg
+                style={{
+                  animation: "spin 1s linear infinite",
+                  height: "3rem",
+                  width: "3rem",
+                  margin: "0 auto",
+                }}
+                xmlns="http://www.w3.org/2000/svg"
+                fill="none"
+                viewBox="0 0 24 24"
+              >
+                <circle
+                  style={{ opacity: "0.25" }}
+                  cx="12"
+                  cy="12"
+                  r="10"
+                  stroke="currentColor"
+                  strokeWidth="4"
+                ></circle>
+                <path
+                  style={{ opacity: "0.75" }}
+                  fill="currentColor"
+                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                ></path>
+              </svg>
+            </div>
+            <p>Processing your purchase...</p>
           </div>
         </div>
       )}
@@ -674,62 +749,64 @@ export default function StoryViewer({ storyData }) {
             <h1 style={titleStyle}>{currentBook.title}</h1>
             <p style={subtitleStyle}>Your personalized storybook</p>
 
-            <div style={headerButtonsStyle}>
-              <button
-                onClick={handleDownloadPDF}
-                style={downloadButtonStyle}
-                disabled={downloadingPdf}
-              >
-                {downloadingPdf ? (
-                  <>
-                    <svg
-                      style={{
-                        animation: "spin 1s linear infinite",
-                        height: "1.25rem",
-                        width: "1.25rem",
-                      }}
-                      xmlns="http://www.w3.org/2000/svg"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                    >
-                      <circle
-                        style={{ opacity: "0.25" }}
-                        cx="12"
-                        cy="12"
-                        r="10"
+            {showFullStory && (
+              <div style={headerButtonsStyle}>
+                <button
+                  onClick={handleDownloadPDF}
+                  style={downloadButtonStyle}
+                  disabled={downloadingPdf}
+                >
+                  {downloadingPdf ? (
+                    <>
+                      <svg
+                        style={{
+                          animation: "spin 1s linear infinite",
+                          height: "1.25rem",
+                          width: "1.25rem",
+                        }}
+                        xmlns="http://www.w3.org/2000/svg"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                      >
+                        <circle
+                          style={{ opacity: "0.25" }}
+                          cx="12"
+                          cy="12"
+                          r="10"
+                          stroke="currentColor"
+                          strokeWidth="4"
+                        ></circle>
+                        <path
+                          style={{ opacity: "0.75" }}
+                          fill="currentColor"
+                          d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                        ></path>
+                      </svg>
+                      Creating PDF...
+                    </>
+                  ) : (
+                    <>
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        width="20"
+                        height="20"
+                        viewBox="0 0 24 24"
+                        fill="none"
                         stroke="currentColor"
-                        strokeWidth="4"
-                      ></circle>
-                      <path
-                        style={{ opacity: "0.75" }}
-                        fill="currentColor"
-                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                      ></path>
-                    </svg>
-                    Creating PDF...
-                  </>
-                ) : (
-                  <>
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      width="20"
-                      height="20"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    >
-                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                      <polyline points="7 10 12 15 17 10"></polyline>
-                      <line x1="12" y1="15" x2="12" y2="3"></line>
-                    </svg>
-                    Download PDF
-                  </>
-                )}
-              </button>
-            </div>
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      >
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                        <polyline points="7 10 12 15 17 10"></polyline>
+                        <line x1="12" y1="15" x2="12" y2="3"></line>
+                      </svg>
+                      Download PDF
+                    </>
+                  )}
+                </button>
+              </div>
+            )}
           </div>
 
           <div style={userInputsStyle}>
@@ -794,13 +871,13 @@ export default function StoryViewer({ storyData }) {
             </div>
           </div>
 
-          {/* Story Pages */}
-          {currentBook.pageImages.map((imageUrl, index) => (
-            <div key={index} style={pageContainerStyle}>
+          {/* First Page Only when not showing full story */}
+          {!showFullStory && currentBook.pageImages.length > 0 && (
+            <div style={pageContainerStyle}>
               <div style={pageHeaderStyle}>
-                <h2 style={pageTitleStyle}>Page {index + 1}</h2>
+                <h2 style={pageTitleStyle}>Page 1</h2>
                 <button
-                  onClick={() => handleRefineClick(index)}
+                  onClick={() => handleRefineClick(0)}
                   style={refineButtonStyle}
                 >
                   Refine Page
@@ -808,18 +885,64 @@ export default function StoryViewer({ storyData }) {
               </div>
               <div style={imageContainerStyle}>
                 <img
-                  src={imageUrl}
-                  alt={`Page ${index + 1}: ${
-                    currentBook.pages[index]?.content || ""
-                  }`}
+                  src={currentBook.pageImages[0]}
+                  alt={`Page 1: ${currentBook.pages[0]?.content || ""}`}
                   style={imageStyle}
                 />
               </div>
               <div style={{ marginTop: "1rem", color: "#3e253d" }}>
-                <p>{currentBook.pages[index]?.content}</p>
+                <p>{currentBook.pages[0]?.content}</p>
               </div>
             </div>
-          ))}
+          )}
+
+          {/* Purchase Button when not showing full story */}
+          {!showFullStory && (
+            <div style={purchaseContainerStyle}>
+              <h2 style={{ color: "#3e253d", marginBottom: "1rem" }}>
+                Want to read the full story?
+              </h2>
+              <p style={{ color: "#3e253d", marginBottom: "1.5rem" }}>
+                Purchase now to unlock all {currentBook.pageImages.length} pages
+                of "{currentBook.title}"
+              </p>
+              <button
+                onClick={handlePurchase}
+                style={purchaseButtonStyle}
+                disabled={purchaseLoading}
+              >
+                Purchase Full Story
+              </button>
+            </div>
+          )}
+
+          {/* Remaining Pages when showing full story */}
+          {showFullStory &&
+            currentBook.pageImages.map((imageUrl, index) => (
+              <div key={index} style={pageContainerStyle}>
+                <div style={pageHeaderStyle}>
+                  <h2 style={pageTitleStyle}>Page {index + 1}</h2>
+                  <button
+                    onClick={() => handleRefineClick(index)}
+                    style={refineButtonStyle}
+                  >
+                    Refine Page
+                  </button>
+                </div>
+                <div style={imageContainerStyle}>
+                  <img
+                    src={imageUrl}
+                    alt={`Page ${index + 1}: ${
+                      currentBook.pages[index]?.content || ""
+                    }`}
+                    style={imageStyle}
+                  />
+                </div>
+                <div style={{ marginTop: "1rem", color: "#3e253d" }}>
+                  <p>{currentBook.pages[index]?.content}</p>
+                </div>
+              </div>
+            ))}
         </>
       )}
     </div>

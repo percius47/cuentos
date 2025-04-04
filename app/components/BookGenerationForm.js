@@ -415,7 +415,7 @@ export default function BookGenerationForm() {
           </div>
 
           <div style={customPromptContainerStyle}>
-            <label style={labelStyle}>Custom Prompt (optional)</label>
+            <label style={labelStyle}>Custom Story Idea (optional)</label>
             <textarea
               name="customPrompt"
               value={formData.customPrompt}

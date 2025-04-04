@@ -1,6 +1,11 @@
 import OpenAI from "openai";
 import { promises as fs } from "fs";
 import path from "path";
+import {
+  createCharacterProfilePrompt,
+  formatConsistentCharacterPrompt,
+  createCharacterReferencePrompt,
+} from "../../../utils/characterConsistency";
 
 // Initialize the OpenAI client
 const openai = new OpenAI({
@@ -244,6 +249,16 @@ export async function POST(request) {
         `[${requestId}] 🔍 Extracting character details from pages...`
       );
 
+      // Extract character details from page descriptions
+      const pageDescriptions = pages
+        .map((page) => page.imageDescription)
+        .join("\n\n");
+
+      // Use our utility function to create the extraction prompt
+      const extractionPrompt =
+        createCharacterProfilePrompt("the protagonist") +
+        `\n\nAnalyze these page descriptions to extract character details:\n${pageDescriptions}`;
+
       // Analyze all pages to find the protagonist's name and description
       for (const page of pages) {
         if (page.imageDescription) {
@@ -326,31 +341,18 @@ export async function POST(request) {
       `[${requestId}] 🧩 Generating character profile for ${protagonistName}...`
     );
 
-    // Craft a detailed character profile prompt
-    const characterProfilePrompt = `Create a character profile sheet for ${protagonistName}, the protagonist of a children's book, ${stylePrompt}
+    // Generate a character reference sheet
+    console.log(`[${requestId}] 🖌️ Generating character reference sheet...`);
 
-DETAILED CHARACTER DESCRIPTION:
-${protagonistDescription}
-
-CRITICAL REQUIREMENTS:
-- This must be a FLAT ILLUSTRATION, NOT a photograph
-- Create a DIRECT FRONT-FACING view of the character (head-to-toe)
-- Show the COMPLETE character with anatomically correct proportions (exactly two arms, two legs)
-- Include clear, distinct facial features that can be easily replicated
-- Ensure hair style and color are highly distinctive and memorable
-- Show detailed clothing with specific colors and patterns
-- Character should be posed naturally with a neutral background
-
-This is a REFERENCE SHEET ONLY, so do NOT include:
-- NO text, labels, captions, or words anywhere
-- NO background elements, scenes, or other characters
-- NO book frames, pages, spines, or meta-representations
-- NO photographic angles, lighting effects, or camera artifacts
-
-PURPOSE: This reference image will be used to ensure the character appears EXACTLY the same in all subsequent illustrations. All details must be clear and easy to reproduce consistently.`;
+    // Use our utility function to create the character reference prompt
+    const characterReferencePrompt = createCharacterReferencePrompt(
+      protagonistName,
+      protagonistDescription,
+      stylePrompt
+    );
 
     // Trim the prompt to ensure it doesn't exceed DALL-E's limit
-    const trimmedProfilePrompt = trimPromptToLimit(characterProfilePrompt);
+    const trimmedProfilePrompt = trimPromptToLimit(characterReferencePrompt);
     const sanitizedProfilePrompt = sanitizePrompt(trimmedProfilePrompt);
 
     console.log(
