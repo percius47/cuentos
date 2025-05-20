@@ -816,7 +816,7 @@ export default function StoryViewer({ storyData }) {
             </h3>
 
             <div>
-              <p style={userInputLabelStyle}>Child's Name</p>
+              <p style={userInputLabelStyle}>Character Name</p>
               <p style={userInputValueStyle}>{currentBook.childName}</p>
             </div>
 

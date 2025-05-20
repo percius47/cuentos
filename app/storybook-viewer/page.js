@@ -1,11 +1,11 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import StoryViewer from "../components/StoryViewer";
 import Link from "next/link";
 
-export default function StorybookViewerPage() {
+function StorybookViewerContent() {
   const searchParams = useSearchParams();
   const [storyData, setStoryData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -139,5 +139,29 @@ export default function StorybookViewerPage() {
         )}
       </main>
     </div>
+  );
+}
+
+export default function StorybookViewerPage() {
+  return (
+    <Suspense
+      fallback={
+        <div
+          style={{
+            minHeight: "100vh",
+            backgroundColor: "#ffe2b9",
+            display: "flex",
+            justifyContent: "center",
+            alignItems: "center",
+          }}
+        >
+          <div style={{ textAlign: "center", color: "#3e253d" }}>
+            <p>Loading...</p>
+          </div>
+        </div>
+      }
+    >
+      <StorybookViewerContent />
+    </Suspense>
   );
 }
