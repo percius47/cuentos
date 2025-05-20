@@ -7,6 +7,8 @@ import {
   createCoverImagePrompt,
   createPageImagePrompt,
 } from "../../../utils/characterConsistency";
+import { NextResponse } from "next/server";
+import { uploadToS3, generateS3Key } from "@/app/utils/s3Client";
 
 // Initialize the OpenAI client
 const openai = new OpenAI({
@@ -150,7 +152,7 @@ export async function POST(request) {
       coverDescription,
       pages,
       illustrationStyle,
-      mainCharacter = requestData.childName || "protagonist", // Use childName as fallback
+      mainCharacter = requestData.childName || "protagonist",
       theme = "general story",
       language = "english",
       ageRange,
@@ -172,27 +174,22 @@ export async function POST(request) {
         ", "
       )}`;
       console.error(`[${requestId}] ❌ Error: ${errorMsg}`);
-      return Response.json({ error: errorMsg }, { status: 400 });
+      return NextResponse.json({ error: errorMsg }, { status: 400 });
     }
 
-    // Create directory for saving images
+    // Create a unique folder name for this story
     const folderName = title
       .replace(/[^\w\s]/gi, "")
       .replace(/\s+/g, "_")
       .toLowerCase();
-    const storiesDir = path.join(process.cwd(), "public", "stories");
-    const bookDir = path.join(storiesDir, folderName);
 
-    await fs.mkdir(bookDir, { recursive: true });
-    console.log(`[${requestId}] 📁 Created directory: ${bookDir}`);
-
-    // Step 1: Generate a detailed character profile using GPT-4o
+    // Step 1: Generate a detailed character profile using GPT-4
     console.log(`[${requestId}] 👤 Generating detailed character profile...`);
 
     const characterPrompt = createCharacterProfilePrompt(mainCharacter);
 
     const characterResponse = await openai.chat.completions.create({
-      model: "gpt-4o",
+      model: "gpt-4",
       messages: [{ role: "user", content: characterPrompt }],
       temperature: 0.7,
     });
@@ -255,25 +252,6 @@ export async function POST(request) {
       );
     }
 
-    // Save the story data with metadata
-    await fs.writeFile(
-      path.join(bookDir, "story.json"),
-      JSON.stringify(
-        {
-          ...storyData,
-          characterProfile,
-          theme,
-          mainCharacter,
-          illustrationStyle,
-          language,
-          ageRange,
-          generatedAt: new Date().toISOString(),
-        },
-        null,
-        2
-      )
-    );
-
     // Define style based on selected illustration style
     let styleDescription = "";
     switch (illustrationStyle) {
@@ -302,285 +280,170 @@ export async function POST(request) {
           "in a colorful and child-friendly illustration style";
     }
 
-    // Check if we have any existing progress
-    const existingProgress = await checkExistingProgress(bookDir);
-    console.log(
-      `[${requestId}] 🔍 Checking for existing generation progress...`
+    // Generate cover image
+    console.log(`[${requestId}] 🖼️ Generating cover image...`);
+
+    const consistentCharacterPrompt =
+      formatConsistentCharacterPrompt(characterProfile);
+    const coverPrompt = createCoverImagePrompt(
+      title,
+      storyData.coverDescription,
+      characterProfile,
+      styleDescription,
+      mainCharacter
     );
 
-    // Generate cover image if not already generated
-    if (!existingProgress.coverGenerated) {
-      console.log(`[${requestId}] 🖼️ Generating cover image...`);
+    try {
+      // Generate the cover image
+      const coverImageResponse = await openai.images.generate({
+        model: "dall-e-3",
+        prompt: coverPrompt,
+        n: 1,
+        size: "1024x1024",
+        quality: "standard",
+        style: "vivid",
+      });
 
-      // Use the utility function to create a consistent character prompt
-      const consistentCharacterPrompt =
-        formatConsistentCharacterPrompt(characterProfile);
+      const coverImageUrl = coverImageResponse.data[0].url;
 
-      // Create cover image prompt using the utility function
-      const coverPrompt = createCoverImagePrompt(
-        title,
-        storyData.coverDescription,
-        characterProfile,
-        styleDescription,
-        mainCharacter
+      // Download the cover image
+      const coverImageFetchResponse = await fetch(coverImageUrl);
+      const coverImageBuffer = await coverImageFetchResponse.arrayBuffer();
+
+      // Upload to S3
+      const coverImageKey = generateS3Key(`stories/${folderName}`, "cover.png");
+      const coverImageS3Url = await uploadToS3(
+        Buffer.from(coverImageBuffer),
+        coverImageKey,
+        "image/png"
       );
 
-      try {
-        // Generate the cover image with retry logic
-        const coverImageUrl = await generateImageWithRetry(
-          requestId,
-          coverPrompt
+      console.log(`[${requestId}] ✅ Cover image created and uploaded to S3`);
+
+      // Generate illustrations for each page
+      console.log(`[${requestId}] 📚 Generating page illustrations...`);
+      const pageUrls = [];
+
+      // Generate all story pages
+      for (let i = 0; i < storyData.pages.length; i++) {
+        const pageNum = i + 1;
+        const page = storyData.pages[i];
+
+        // Create page illustration prompt
+        const pagePrompt = createPageImagePrompt(
+          pageNum,
+          page.imageDescription,
+          characterProfile,
+          styleDescription,
+          mainCharacter
         );
 
-        // Download the cover image with retry logic
-        const coverImagePath = path.join(bookDir, "cover.png");
-        await downloadImageWithRetry(requestId, coverImageUrl, coverImagePath);
-
-        console.log(`[${requestId}] ✅ Cover image created and saved`);
-
-        // Update progress
-        existingProgress.coverGenerated = true;
-        await saveGenerationProgress(bookDir, existingProgress);
-      } catch (coverError) {
-        console.error(
-          `[${requestId}] ❌ Failed to generate cover image: ${coverError.message}`
-        );
-        return Response.json(
-          { error: "Failed to generate cover image" },
-          { status: 500 }
-        );
-      }
-    } else {
-      console.log(`[${requestId}] ℹ️ Cover image already generated, skipping`);
-    }
-
-    // Generate illustrations for each page
-    console.log(`[${requestId}] 📚 Generating page illustrations...`);
-
-    const pageUrls = [];
-
-    // Generate all story pages in batches to respect rate limits
-    console.log(
-      `[${requestId}] 🖼️ Generating all ${storyData.pages.length} page illustrations...`
-    );
-
-    // Track generation progress
-    const generationResults = {
-      total: storyData.pages.length,
-      successful: existingProgress.pagesGenerated.length || 0,
-      failed: 0,
-      failedPages: [...(existingProgress.failedPages || [])],
-      pagesGenerated: [...(existingProgress.pagesGenerated || [])],
-    };
-
-    // Create a list of pages that still need to be generated
-    const pagesToGenerate = [];
-    for (let i = 0; i < storyData.pages.length; i++) {
-      const pageNum = i + 1;
-      if (!generationResults.pagesGenerated.includes(pageNum)) {
-        pagesToGenerate.push(i);
-      }
-    }
-
-    console.log(
-      `[${requestId}] ℹ️ ${pagesToGenerate.length} pages need to be generated, ${generationResults.successful} already exist`
-    );
-
-    for (let i = 0; i < pagesToGenerate.length; i++) {
-      const pageIndex = pagesToGenerate[i];
-      const pageNum = pageIndex + 1;
-      const page = storyData.pages[pageIndex];
-
-      // Add rate limiting delay between batches
-      if (i > 0 && i % BATCH_SIZE === 0) {
         console.log(
-          `[${requestId}] ⏱️ Rate limit pause - waiting ${
-            BATCH_DELAY / 1000
-          } seconds before continuing...`
+          `[${requestId}] 🖌️ Generating illustration for page ${pageNum}/${storyData.pages.length}...`
         );
-        await new Promise((resolve) => setTimeout(resolve, BATCH_DELAY));
-      }
-
-      // Create page illustration prompt using the utility function
-      const pagePrompt = createPageImagePrompt(
-        pageNum,
-        page.imageDescription,
-        characterProfile,
-        styleDescription,
-        mainCharacter
-      );
-
-      console.log(
-        `[${requestId}] 🖌️ Generating illustration for page ${pageNum}/${
-          storyData.pages.length
-        } (${Math.round(
-          ((i + 1) / pagesToGenerate.length) * 100
-        )}% complete)...`
-      );
-
-      try {
-        // Generate the page image with retry logic
-        const pageImageUrl = await generateImageWithRetry(
-          requestId,
-          pagePrompt
-        );
-
-        // Download the page image with retry logic
-        const pageImagePath = path.join(bookDir, `page${pageNum}.png`);
-        await downloadImageWithRetry(requestId, pageImageUrl, pageImagePath);
-
-        pageUrls.push(`/stories/${folderName}/page${pageNum}.png`);
-        console.log(
-          `[${requestId}] ✅ Page ${pageNum} illustration created and saved`
-        );
-
-        // Update generation results
-        generationResults.successful++;
-        generationResults.pagesGenerated.push(pageNum);
-
-        // Save progress after each successful generation
-        await saveGenerationProgress(bookDir, generationResults);
-      } catch (error) {
-        console.error(
-          `[${requestId}] ❌ Error generating page ${pageNum}:`,
-          error.message
-        );
-        generationResults.failed++;
-        generationResults.failedPages.push(pageNum);
-
-        // Save progress after each failed generation
-        await saveGenerationProgress(bookDir, generationResults);
-        // Continue with other pages even if one fails
-      }
-    }
-
-    // Add already generated pages to pageUrls
-    for (const pageNum of existingProgress.pagesGenerated) {
-      if (!pageUrls.includes(`/stories/${folderName}/page${pageNum}.png`)) {
-        pageUrls.push(`/stories/${folderName}/page${pageNum}.png`);
-      }
-    }
-
-    // Log generation summary
-    console.log(
-      `[${requestId}] 📊 Generation summary: ${generationResults.successful}/${generationResults.total} pages successful`
-    );
-    if (generationResults.failedPages.length > 0) {
-      console.log(
-        `[${requestId}] ⚠️ Failed pages: ${generationResults.failedPages.join(
-          ", "
-        )}`
-      );
-    }
-
-    // Check if we need to retry any failed pages
-    if (
-      generationResults.failedPages.length > 0 &&
-      generationResults.failedPages.length < generationResults.total
-    ) {
-      console.log(
-        `[${requestId}] 🔄 Attempting to regenerate ${generationResults.failedPages.length} failed pages...`
-      );
-
-      // Wait a bit before retrying to avoid rate limits
-      console.log(
-        `[${requestId}] ⏱️ Waiting 65 seconds before retrying failed pages...`
-      );
-      await new Promise((resolve) => setTimeout(resolve, 65000));
-
-      // Try to regenerate each failed page
-      for (const pageNum of generationResults.failedPages) {
-        const pageIndex = pageNum - 1;
-        const page = storyData.pages[pageIndex];
-
-        console.log(`[${requestId}] 🔄 Regenerating page ${pageNum}...`);
-
-        // Create a simplified prompt for the retry
-        const retryPrompt = `Create an illustration for page ${pageNum} of a children's story-book ${styleDescription}.
-
-Scene description:
-${page.imageDescription}
-
-${consistentCharacterPrompt}
-
-CRITICAL REQUIREMENTS:
-1. Do NOT include ANY text in the illustration
-2. NO words, letters, labels, or text elements of any kind
-3. Create a direct illustration of the scene described above
-4. Character must be consistent with the description`;
 
         try {
-          // Try with simplified prompt
-          const pageImageUrl = await generateImageWithRetry(
-            requestId,
-            retryPrompt,
-            1
-          );
+          // Generate the page image
+          const pageImageResponse = await openai.images.generate({
+            model: "dall-e-3",
+            prompt: pagePrompt,
+            n: 1,
+            size: "1024x1024",
+            quality: "standard",
+            style: "vivid",
+          });
+
+          const pageImageUrl = pageImageResponse.data[0].url;
 
           // Download the page image
-          const pageImagePath = path.join(bookDir, `page${pageNum}.png`);
-          await downloadImageWithRetry(requestId, pageImageUrl, pageImagePath);
+          const pageImageFetchResponse = await fetch(pageImageUrl);
+          const pageImageBuffer = await pageImageFetchResponse.arrayBuffer();
 
-          // Add to page URLs if not already there
-          if (!pageUrls.includes(`/stories/${folderName}/page${pageNum}.png`)) {
-            pageUrls.push(`/stories/${folderName}/page${pageNum}.png`);
-          }
+          // Upload to S3
+          const pageImageKey = generateS3Key(
+            `stories/${folderName}`,
+            `page${pageNum}.png`
+          );
+          const pageImageS3Url = await uploadToS3(
+            Buffer.from(pageImageBuffer),
+            pageImageKey,
+            "image/png"
+          );
 
+          pageUrls.push(pageImageS3Url);
           console.log(
-            `[${requestId}] ✅ Retry successful: Page ${pageNum} illustration created and saved`
+            `[${requestId}] ✅ Page ${pageNum} illustration created and uploaded to S3`
           );
 
-          // Update generation results
-          generationResults.successful++;
-          generationResults.failedPages = generationResults.failedPages.filter(
-            (p) => p !== pageNum
-          );
-          generationResults.pagesGenerated.push(pageNum);
-
-          // Save updated progress
-          await saveGenerationProgress(bookDir, generationResults);
-        } catch (retryError) {
+          // Add rate limiting delay between generations
+          if (i < storyData.pages.length - 1) {
+            await new Promise((resolve) => setTimeout(resolve, 1000));
+          }
+        } catch (error) {
           console.error(
-            `[${requestId}] ❌ Final retry failed for page ${pageNum}:`,
-            retryError.message
+            `[${requestId}] ❌ Error generating page ${pageNum}:`,
+            error.message
           );
+          throw error;
         }
       }
+
+      // Store story data in S3
+      const storyDataKey = generateS3Key(`stories/${folderName}`, "story.json");
+      await uploadToS3(
+        Buffer.from(
+          JSON.stringify(
+            {
+              ...storyData,
+              characterProfile,
+              theme,
+              mainCharacter,
+              illustrationStyle,
+              language,
+              ageRange,
+              generatedAt: new Date().toISOString(),
+            },
+            null,
+            2
+          )
+        ),
+        storyDataKey,
+        "application/json"
+      );
+
+      console.log(
+        `[${requestId}] 🎉 Story and illustration generation complete!`
+      );
+
+      // Return the results including all story data for future use
+      return NextResponse.json({
+        success: true,
+        title: storyData.title,
+        coverImage: coverImageS3Url,
+        pageImages: pageUrls,
+        pageCount: pageUrls.length,
+        mainCharacter: mainCharacter,
+        theme: theme,
+        language: language,
+        illustrationStyle: illustrationStyle,
+        storyData: {
+          ...storyData,
+          characterProfile,
+        },
+      });
+    } catch (error) {
+      console.error(`[${requestId}] ❌ Error:`, error);
+      return NextResponse.json(
+        {
+          error: "Failed to generate story and images",
+          message: error.message,
+        },
+        { status: 500 }
+      );
     }
-
-    // Sort pageUrls numerically
-    pageUrls.sort((a, b) => {
-      const aNum = parseInt(a.match(/page(\d+)\.png/)?.[1] || "0");
-      const bNum = parseInt(b.match(/page(\d+)\.png/)?.[1] || "0");
-      return aNum - bNum;
-    });
-
-    console.log(
-      `[${requestId}] 🎉 Story and illustration generation complete! ${generationResults.successful}/${generationResults.total} pages successfully generated.`
-    );
-
-    // Return the results including all story data for future use
-    return Response.json({
-      success: true,
-      title: storyData.title,
-      coverImage: `/stories/${folderName}/cover.png`,
-      pageImages: pageUrls,
-      pageCount: pageUrls.length,
-      mainCharacter: mainCharacter,
-      theme: theme,
-      language: language,
-      illustrationStyle: illustrationStyle,
-      storyData: {
-        ...storyData,
-        characterProfile,
-      },
-      allPagesGenerated:
-        generationResults.successful === generationResults.total,
-      generationSummary: generationResults,
-    });
   } catch (error) {
     console.error(`[${requestId}] ❌ Error:`, error);
-    return Response.json(
+    return NextResponse.json(
       {
         error: "Failed to generate story and images",
         message: error.message,

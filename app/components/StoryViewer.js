@@ -867,6 +867,7 @@ export default function StoryViewer({ storyData }) {
                 src={currentBook.coverImage}
                 alt={`Cover: ${currentBook.title}`}
                 style={imageStyle}
+                crossOrigin="anonymous"
               />
             </div>
           </div>
@@ -888,6 +889,7 @@ export default function StoryViewer({ storyData }) {
                   src={currentBook.pageImages[0]}
                   alt={`Page 1: ${currentBook.pages[0]?.content || ""}`}
                   style={imageStyle}
+                  crossOrigin="anonymous"
                 />
               </div>
               <div style={{ marginTop: "1rem", color: "#3e253d" }}>
@@ -936,6 +938,7 @@ export default function StoryViewer({ storyData }) {
                       currentBook.pages[index]?.content || ""
                     }`}
                     style={imageStyle}
+                    crossOrigin="anonymous"
                   />
                 </div>
                 <div style={{ marginTop: "1rem", color: "#3e253d" }}>

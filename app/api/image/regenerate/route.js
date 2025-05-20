@@ -1,6 +1,6 @@
+import { NextResponse } from "next/server";
 import OpenAI from "openai";
-import { promises as fs } from "fs";
-import path from "path";
+import { uploadToS3, generateS3Key } from "@/app/utils/s3Client";
 import {
   formatConsistentCharacterPrompt,
   createCoverImagePrompt,
@@ -328,397 +328,132 @@ function defineStyle(illustrationStyle) {
 }
 
 export async function POST(request) {
-  const requestId =
-    Date.now().toString(36) + Math.random().toString(36).substr(2);
-  console.log(`[${requestId}] 🔄 Image regeneration task started`);
+  const requestId = Date.now().toString(36);
+  console.log(`[${requestId}] 🚀 Image regeneration process started`);
 
   try {
+    const requestData = await request.json();
     const {
       storyId,
       pageIndex,
       feedback,
       title,
       coverDescription,
-      pageData: requestPageData,
+      pageData,
       illustrationStyle,
-    } = await request.json();
+    } = requestData;
 
-    const isCover = pageIndex === "cover";
-
-    console.log(
-      `[${requestId}] 📝 Parameters received: storyId=${storyId}, pageIndex=${pageIndex}, feedbackType=${feedback?.type}`
-    );
-    console.log(
-      `[${requestId}] 🔍 Feedback details: ${feedback?.details || "none"}`
-    );
-
-    if (
-      !storyId ||
-      pageIndex === undefined ||
-      !feedback ||
-      !illustrationStyle
-    ) {
-      console.log(`[${requestId}] ❌ Error: Missing required data`);
-      return Response.json({ error: "Missing required data" }, { status: 400 });
+    // Validate required inputs
+    if (!storyId || pageIndex === undefined) {
+      return NextResponse.json(
+        { error: "Missing required parameters" },
+        { status: 400 }
+      );
     }
 
-    if (isCover && (!title || !coverDescription)) {
-      console.log(`[${requestId}] ❌ Error: Missing cover data`);
-      return Response.json({ error: "Missing cover data" }, { status: 400 });
-    }
-
-    if (!isCover && !requestPageData) {
-      console.log(`[${requestId}] ❌ Error: Missing page data`);
-      return Response.json({ error: "Missing page data" }, { status: 400 });
-    }
-
-    // Format the folder name based on the title or storyId (remove special characters)
+    // Create a unique folder name for this story
     const folderName = title
-      ? title
-          .replace(/[^\w\s]/gi, "")
-          .replace(/\s+/g, "_")
-          .toLowerCase()
-      : `story_${storyId}`;
+      .replace(/[^\w\s]/gi, "")
+      .replace(/\s+/g, "_")
+      .toLowerCase();
 
-    const storiesDir = path.join(process.cwd(), "public", "stories");
-    const bookDir = path.join(storiesDir, folderName);
-
-    console.log(`[${requestId}] 📁 Using directory: ${bookDir}`);
-
-    // Create directory if it doesn't exist
-    try {
-      await fs.mkdir(bookDir, { recursive: true });
-      console.log(`[${requestId}] ✅ Directory created or already exists`);
-    } catch (error) {
-      console.error(`[${requestId}] ❌ Error creating directory:`, error);
-      return Response.json(
-        { error: "Failed to create directory" },
-        { status: 500 }
-      );
-    }
-
-    // Generate the image
-    let rawPrompt;
-    let fileName;
-    let currentPageData;
-    let consistentCharacterPrompt = "";
-    let storyData;
-
-    // Load the story data
-    try {
-      storyData = JSON.parse(
-        await fs.readFile(path.join(bookDir, "story.json"), "utf8")
-      );
-
-      // Get the character profile from the story data
-      const characterProfile = storyData.characterProfile || "";
-
-      // Create structured character prompt for consistency using utility function
-      consistentCharacterPrompt =
-        formatConsistentCharacterPrompt(characterProfile);
-    } catch (error) {
-      console.log(
-        `[${requestId}] ℹ️ No character profile found. Attempting to access other pages for character information...`
-      );
-
-      // Attempt to find other pages to extract character description
-      try {
-        // Look for all page files in the directory
-        const files = await fs.readdir(bookDir);
-        const pageFiles = files.filter(
-          (file) => file.startsWith("page") && file.endsWith(".png")
-        );
-
-        if (pageFiles.length > 0) {
-          console.log(
-            `[${requestId}] ✅ Found ${pageFiles.length} page files to analyze for character consistency`
-          );
-
-          // Use either the pageData or the cover description for character info
-          let characterDescription = "";
-          if (requestPageData && requestPageData.imageDescription) {
-            characterDescription = requestPageData.imageDescription;
-          } else if (coverDescription) {
-            characterDescription = coverDescription;
-          }
-
-          if (characterDescription) {
-            consistentCharacterPrompt = `
-CRITICAL CHARACTER CONSISTENCY:
-The main character must look consistent with other story illustrations.
-Based on the story context:
-${characterDescription}
-
-Maintain consistent appearance, proportions, colors, and style with the other pages of the book.
-This is ABSOLUTELY CRITICAL for maintaining story continuity.`;
-          }
-        }
-      } catch (dirError) {
-        console.log(
-          `[${requestId}] ⚠️ Unable to analyze directory for character consistency: ${dirError.message}`
-        );
-      }
-    }
-
-    // If still no character prompt, create a basic one
-    if (
-      !consistentCharacterPrompt &&
-      (requestPageData?.imageDescription || coverDescription)
-    ) {
-      const description = requestPageData?.imageDescription || coverDescription;
-      consistentCharacterPrompt = `
-CRITICAL CHARACTER CONSISTENCY:
-The main character must look consistent across all illustrations.
-Based on the description:
-${description}
-
-Maintain consistent appearance, proportions, colors, and style. The character should be immediately recognizable as the same character from other illustrations in the book.`;
-    }
-
-    // Define style prompts based on the illustration style
-    let stylePrompt = "";
-
+    // Define style based on selected illustration style
+    let styleDescription = "";
     switch (illustrationStyle) {
       case "pixar-style":
-        stylePrompt =
-          "in Pixar 3D animation style, with vibrant colors and detailed textures. Maintain consistent character designs with the same proportions, features, and clothing styles throughout all illustrations.";
+        styleDescription =
+          "in Pixar 3D animation style, with vibrant colors and detailed textures";
         break;
       case "disney-classic":
-        stylePrompt =
-          "in classic Disney animation style, with fluid lines and warm colors. Maintain consistent character designs with the same proportions, features, and clothing styles throughout all illustrations.";
+        styleDescription =
+          "in classic Disney animation style, with fluid lines and warm colors";
         break;
       case "hand-drawn-watercolor":
-        stylePrompt =
-          "in hand-drawn watercolor style, with soft brush strokes and translucent colors. Maintain consistent character designs with the same proportions, features, and clothing styles throughout all illustrations.";
+        styleDescription =
+          "in hand-drawn watercolor style, with soft brush strokes and translucent colors";
         break;
       case "cartoon-sketch":
-        stylePrompt =
-          "in cartoon sketch style, with bold outlines and flat colors. Maintain consistent character designs with the same proportions, features, and clothing styles throughout all illustrations.";
+        styleDescription =
+          "in cartoon sketch style, with bold outlines and flat colors";
         break;
       case "minimalist-modern":
-        stylePrompt =
-          "in minimalist modern style, with simple geometric shapes and solid colors. Maintain consistent character designs with the same proportions, features, and clothing styles throughout all illustrations.";
+        styleDescription =
+          "in minimalist modern style, with simple geometric shapes and solid colors";
         break;
       default:
-        stylePrompt =
-          "in a colorful and child-friendly style. Maintain consistent character designs with the same proportions, features, and clothing styles throughout all illustrations.";
+        styleDescription =
+          "in a colorful and child-friendly illustration style";
     }
-    console.log(`[${requestId}] 🎨 Illustration style prompt: ${stylePrompt}`);
 
     // Generate the image
-    if (isCover) {
-      // Define style based on selected illustration style
-      let styleDescription = defineStyle(illustrationStyle);
+    const isCover = pageIndex === "cover";
+    const prompt = isCover
+      ? `Create a cover illustration for a children's story-book ${styleDescription}.
 
-      // If we have storyData from earlier
-      if (storyData) {
-        const mainCharacter = storyData.mainCharacter || "protagonist";
-        const characterProfile = storyData.characterProfile || "";
+Title: ${title}
+Description: ${coverDescription}
 
-        // Use utility function to create cover prompt
-        const coverPrompt = createCoverImagePrompt(
-          title,
-          storyData.coverDescription || coverDescription,
-          characterProfile,
-          styleDescription,
-          mainCharacter,
-          feedback?.details || ""
-        );
-
-        rawPrompt = coverPrompt;
-      } else {
-        // Fallback if storyData is not available
-        rawPrompt = `Create a front cover illustration for a children's book titled "${title}", ${styleDescription}.
-${coverDescription}
-
-${consistentCharacterPrompt}
+Additional feedback: ${feedback}
 
 CRITICAL REQUIREMENTS:
 1. Do NOT include ANY text in the illustration
-2. NO words, lettering, labels, or text elements of any kind should appear
-3. Create a direct illustration, NOT a photograph or meta-representation of a book
-4. Character must be rendered with 100% consistency to the profile above
-${
-  feedback?.details
-    ? `\nADDITIONAL FEEDBACK TO ADDRESS:\n${feedback.details}`
-    : ""
-}`;
-      }
-
-      fileName = "cover.png";
-    } else if (
-      pageIndex >= 0 &&
-      storyData &&
-      storyData.pages &&
-      pageIndex < storyData.pages.length
-    ) {
-      const page = storyData.pages[pageIndex];
-      currentPageData = page;
-
-      // Define style based on selected illustration style
-      let styleDescription = defineStyle(illustrationStyle);
-      const mainCharacter = storyData.mainCharacter || "protagonist";
-      const characterProfile = storyData.characterProfile || "";
-
-      // Use utility function to create page prompt
-      const pagePrompt = createPageImagePrompt(
-        parseInt(pageIndex) + 1,
-        page.imageDescription,
-        characterProfile,
-        styleDescription,
-        mainCharacter,
-        feedback?.details || ""
-      );
-
-      rawPrompt = pagePrompt;
-      fileName = `page${parseInt(pageIndex) + 1}.png`;
-    } else if (requestPageData) {
-      // Fallback if we don't have storyData but have pageData
-      const styleDescription = defineStyle(illustrationStyle);
-
-      rawPrompt = `Create an illustration for a children's story-book ${styleDescription}.
+2. NO words, letters, labels, or text elements of any kind
+3. Create a direct illustration of the scene described above`
+      : `Create an illustration for page ${
+          pageIndex + 1
+        } of a children's story-book ${styleDescription}.
 
 Scene description:
-${requestPageData.imageDescription}
+${pageData.imageDescription}
 
-${consistentCharacterPrompt}
+Additional feedback: ${feedback}
 
 CRITICAL REQUIREMENTS:
 1. Do NOT include ANY text in the illustration
-2. NO words, lettering, labels, or text elements of any kind should appear
-3. Create a direct illustration, NOT a photograph or meta-representation of a book
-4. Character must match EXACTLY the description above with no deviations
-${
-  feedback?.details
-    ? `\nADDITIONAL FEEDBACK TO ADDRESS:\n${feedback.details}`
-    : ""
-}`;
+2. NO words, letters, labels, or text elements of any kind
+3. Create a direct illustration of the scene described above`;
 
-      fileName = `page${parseInt(pageIndex) + 1}.png`;
-    }
+    console.log(`[${requestId}] 🖌️ Generating new image...`);
 
-    // Enhance the prompt with feedback
-    if (!rawPrompt) {
-      return Response.json(
-        { error: "Failed to generate prompt for the image" },
-        { status: 500 }
-      );
-    }
+    const imageResponse = await openai.images.generate({
+      model: "dall-e-3",
+      prompt: prompt,
+      n: 1,
+      size: "1024x1024",
+      quality: "standard",
+      style: "vivid",
+    });
 
-    const enhancedPrompt = enhancePromptWithFeedback(rawPrompt, feedback);
-    // Trim the enhanced prompt to acceptable length
-    const trimmedPrompt = trimPromptToLimit(enhancedPrompt);
-    // Then sanitize the trimmed prompt
-    const finalPrompt = sanitizePrompt(trimmedPrompt);
+    const imageUrl = imageResponse.data[0].url;
 
-    console.log(`[${requestId}] 🖼️ Generating image with DALLE 3...`);
-    console.log(
-      `[${requestId}] 📋 Prompt length: ${finalPrompt.length} characters`
+    // Download the image
+    const imageFetchResponse = await fetch(imageUrl);
+    const imageBuffer = await imageFetchResponse.arrayBuffer();
+
+    // Upload to S3
+    const imageKey = generateS3Key(
+      `stories/${folderName}`,
+      isCover ? "cover.png" : `page${pageIndex + 1}.png`
+    );
+    const imageS3Url = await uploadToS3(
+      Buffer.from(imageBuffer),
+      imageKey,
+      "image/png"
     );
 
-    let imageUrl = null;
-    let generationAttempts = 0;
-    const MAX_GENERATION_ATTEMPTS = 2;
+    console.log(`[${requestId}] ✅ New image generated and uploaded to S3`);
 
-    while (generationAttempts < MAX_GENERATION_ATTEMPTS) {
-      try {
-        generationAttempts++;
-        console.log(
-          `[${requestId}] 🔄 Image generation attempt ${generationAttempts}/${MAX_GENERATION_ATTEMPTS}`
-        );
-
-        const response = await openai.images.generate({
-          model: "dall-e-3",
-          prompt: finalPrompt,
-          n: 1,
-          size: "1024x1024",
-        });
-
-        console.log(`[${requestId}] ✅ Image generated successfully`);
-        imageUrl = response.data[0].url;
-
-        // Validate the generated image
-        const validationResult = await validateImageQuality(imageUrl, {
-          type: isCover ? "cover" : "page",
-          hasCharacter: consistentCharacterPrompt ? true : false,
-          hasText: isCover, // Only cover should have text
-          textContent: isCover ? title : null, // No text content for story pages
-        });
-
-        if (validationResult.passed) {
-          console.log(`[${requestId}] ✅ Image passed quality validation`);
-          break;
-        } else {
-          console.log(
-            `[${requestId}] ⚠️ Image failed validation: ${validationResult.issues.join(
-              ", "
-            )}`
-          );
-          if (generationAttempts >= MAX_GENERATION_ATTEMPTS) {
-            console.log(
-              `[${requestId}] ❌ Maximum generation attempts reached, proceeding with last image`
-            );
-          }
-        }
-      } catch (error) {
-        console.error(`[${requestId}] ❌ Error generating image:`, error);
-        logApiError(requestId, error);
-        break;
-      }
-    }
-
-    if (!imageUrl) {
-      return Response.json(
-        { error: "Failed to generate the image after multiple attempts" },
-        { status: 500 }
-      );
-    }
-
-    // Download and save the image
-    console.log(`[${requestId}] 📥 Downloading image...`);
-    try {
-      const imageResponse = await fetchWithRetry(imageUrl);
-      const imageArrayBuffer = await imageResponse.arrayBuffer();
-      const imageBuffer = Buffer.from(imageArrayBuffer);
-      const imagePath = path.join(bookDir, fileName);
-      await fs.writeFile(imagePath, imageBuffer);
-      console.log(`[${requestId}] 💾 Image saved to ${imagePath}`);
-
-      // Return the URL for the saved image
-      const publicImageUrl = `/stories/${folderName}/${fileName}`;
-      console.log(
-        `[${requestId}] ✅ Image regeneration task completed successfully`
-      );
-      return Response.json({
-        imageUrl: publicImageUrl,
-        success: true,
-        message: "Image regenerated successfully",
-      });
-    } catch (downloadError) {
-      console.error(
-        `[${requestId}] ❌ Error downloading generated image:`,
-        downloadError.message
-      );
-
-      // Return partial success
-      return Response.json({
-        imageUrl: imageUrl, // Return the original DALL-E URL
-        success: true,
-        message: "Image regenerated but couldn't be downloaded",
-        warning:
-          "Image couldn't be downloaded to server due to connection issues",
-      });
-    }
+    return NextResponse.json({
+      success: true,
+      imageUrl: imageS3Url,
+    });
   } catch (error) {
-    console.error(`[${requestId}] ❌ Error processing request:`, error);
-
-    // Log detailed error information when available
-    if (error.response?.data || error.code || error.status) {
-      logApiError(requestId, error);
-    }
-
-    return Response.json(
-      { error: "Failed to process regeneration request" },
+    console.error(`[${requestId}] ❌ Error:`, error);
+    return NextResponse.json(
+      {
+        error: "Failed to regenerate image",
+        message: error.message,
+      },
       { status: 500 }
     );
   }

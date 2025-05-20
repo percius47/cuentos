@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import LoadingScreen from "./LoadingScreen";
 
 export default function BookGenerationForm() {
   const [formData, setFormData] = useState({
@@ -14,6 +15,8 @@ export default function BookGenerationForm() {
   const [loading, setLoading] = useState(false);
   const [generatedBook, setGeneratedBook] = useState(null);
   const [error, setError] = useState(null);
+  const [generationStep, setGenerationStep] = useState(0);
+  const [generationStatus, setGenerationStatus] = useState("");
 
   const themes = [
     {
@@ -70,9 +73,12 @@ export default function BookGenerationForm() {
     e.preventDefault();
     setLoading(true);
     setError(null);
+    setGenerationStep(0);
+    setGenerationStatus("Starting story generation...");
 
     try {
-      // Call the API to generate the story
+      // Step 1: Generate the story
+      setGenerationStatus("Creating your story...");
       const storyResponse = await fetch("/api/story/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -85,7 +91,11 @@ export default function BookGenerationForm() {
         throw new Error(storyData.error || "Error generating story");
       }
 
-      // Call the API to generate images
+      setGenerationStep(1);
+      setGenerationStatus("Generating character profile...");
+
+      // Step 2: Generate images
+      setGenerationStatus("Creating beautiful illustrations...");
       const imageResponse = await fetch("/api/image/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -107,11 +117,14 @@ export default function BookGenerationForm() {
         throw new Error(imageData.error || "Error generating images");
       }
 
+      setGenerationStep(2);
+      setGenerationStatus("Finalizing your storybook...");
+
       // Create complete storybook data
       const completeStoryData = {
         id: Date.now().toString(36),
         ...storyData,
-        ...formData, // Include the user inputs
+        ...formData,
         readingLevel:
           ageOptions.find((opt) => opt.value === formData.age)?.label ||
           formData.age,
@@ -129,6 +142,9 @@ export default function BookGenerationForm() {
         `story_${completeStoryData.id}`,
         JSON.stringify(completeStoryData)
       );
+
+      setGenerationStep(3);
+      setGenerationStatus("Your storybook is ready!");
 
       // Navigate to the storybook viewer page
       window.location.href = `/storybook-viewer?id=${completeStoryData.id}`;
@@ -317,6 +333,14 @@ export default function BookGenerationForm() {
 
   return (
     <div style={formContainerStyle}>
+      {loading && (
+        <LoadingScreen
+          totalSteps={3}
+          currentStep={generationStep}
+          status={generationStatus}
+        />
+      )}
+
       <h2 style={headingStyle}>Create a Personalized Story</h2>
 
       {error && <div style={errorStyle}>{error}</div>}
