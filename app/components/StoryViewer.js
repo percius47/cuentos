@@ -909,7 +909,7 @@ export default function StoryViewer({ storyData }) {
               </h2>
               <p style={{ color: "#3e253d", marginBottom: "1.5rem" }}>
                 Purchase now to unlock all {currentBook.pageImages.length} pages
-                of "{currentBook.title}"
+                of &quot;{currentBook.title}&quot;
               </p>
               <button
                 onClick={handlePurchase}

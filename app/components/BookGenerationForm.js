@@ -349,7 +349,7 @@ export default function BookGenerationForm() {
       {!generatedBook ? (
         <form onSubmit={handleSubmit} style={formStyle}>
           <div style={formGroupStyle}>
-            <label style={labelStyle}>Child's Name</label>
+            <label style={labelStyle}>Child&apos;s Name</label>
             <input
               type="text"
               name="childName"
