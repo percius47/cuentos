@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { useSearchParams } from "next/navigation";
 import StoryViewer from "../components/StoryViewer";
+import Link from "next/link";
 
 export default function StorybookViewerPage() {
   const searchParams = useSearchParams();
@@ -67,7 +68,7 @@ export default function StorybookViewerPage() {
           >
             Cuentos
           </h1>
-          <a
+          <Link
             href="/"
             style={{
               color: "#ffe2b9", // Light beige
@@ -78,7 +79,7 @@ export default function StorybookViewerPage() {
             }}
           >
             ← Back to home
-          </a>
+          </Link>
         </div>
       </nav>
 
@@ -117,7 +118,7 @@ export default function StorybookViewerPage() {
               Error
             </h2>
             <p>{error}</p>
-            <a
+            <Link
               href="/"
               style={{
                 display: "inline-block",
@@ -131,7 +132,7 @@ export default function StorybookViewerPage() {
               }}
             >
               Return to Home Page
-            </a>
+            </Link>
           </div>
         ) : (
           storyData && <StoryViewer storyData={storyData} />

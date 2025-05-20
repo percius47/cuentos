@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import LoadingScreen from "./LoadingScreen";
+import Image from "next/image";
 
 export default function BookGenerationForm() {
   const [formData, setFormData] = useState({
@@ -498,14 +499,12 @@ export default function BookGenerationForm() {
           <div style={cardStyle}>
             <h3 style={cardTitleStyle}>{generatedBook.title}</h3>
             <div style={imageContainerStyle}>
-              <img
+              <Image
                 src={generatedBook.coverImage}
                 alt="Book Cover"
-                style={{
-                  maxWidth: "100%",
-                  margin: "0 auto",
-                  borderRadius: "0.5rem",
-                }}
+                width={300}
+                height={400}
+                style={{ objectFit: "cover" }}
               />
             </div>
           </div>
@@ -522,14 +521,12 @@ export default function BookGenerationForm() {
               First Page Preview:
             </h4>
             <div style={imageContainerStyle}>
-              <img
+              <Image
                 src={generatedBook.pageImages[0]}
                 alt="First Page"
-                style={{
-                  maxWidth: "100%",
-                  margin: "0 auto",
-                  borderRadius: "0.5rem",
-                }}
+                width={300}
+                height={400}
+                style={{ objectFit: "cover" }}
               />
             </div>
           </div>

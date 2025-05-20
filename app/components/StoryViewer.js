@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import PageRefiner from "./PageRefiner";
 import { jsPDF } from "jspdf";
+import Image from "next/image";
 
 // Add global styles for the font
 const fontStyles = `
@@ -863,11 +864,12 @@ export default function StoryViewer({ storyData }) {
               </button>
             </div>
             <div style={imageContainerStyle}>
-              <img
+              <Image
                 src={currentBook.coverImage}
-                alt={`Cover: ${currentBook.title}`}
-                style={imageStyle}
-                crossOrigin="anonymous"
+                alt="Cover"
+                width={300}
+                height={400}
+                style={{ objectFit: "cover" }}
               />
             </div>
           </div>
@@ -885,11 +887,12 @@ export default function StoryViewer({ storyData }) {
                 </button>
               </div>
               <div style={imageContainerStyle}>
-                <img
+                <Image
                   src={currentBook.pageImages[0]}
-                  alt={`Page 1: ${currentBook.pages[0]?.content || ""}`}
-                  style={imageStyle}
-                  crossOrigin="anonymous"
+                  alt="Page 1"
+                  width={300}
+                  height={400}
+                  style={{ objectFit: "cover" }}
                 />
               </div>
               <div style={{ marginTop: "1rem", color: "#3e253d" }}>
@@ -932,13 +935,14 @@ export default function StoryViewer({ storyData }) {
                   </button>
                 </div>
                 <div style={imageContainerStyle}>
-                  <img
+                  <Image
                     src={imageUrl}
                     alt={`Page ${index + 1}: ${
                       currentBook.pages[index]?.content || ""
                     }`}
-                    style={imageStyle}
-                    crossOrigin="anonymous"
+                    width={300}
+                    height={400}
+                    style={{ objectFit: "cover" }}
                   />
                 </div>
                 <div style={{ marginTop: "1rem", color: "#3e253d" }}>

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Image from "next/image";
 
 export default function PageRefiner({
   pageData,
@@ -116,10 +117,12 @@ export default function PageRefiner({
         Refine {isCover ? "Cover" : `Page ${pageData.pageIndex + 1}`}
       </h2>
 
-      <img
+      <Image
         src={pageData.imageUrl}
         alt={isCover ? "Cover" : `Page ${pageData.pageIndex + 1}`}
-        style={imageStyle}
+        width={300}
+        height={400}
+        style={{ objectFit: "cover" }}
       />
 
       <form onSubmit={handleSubmit} style={formStyle}>
