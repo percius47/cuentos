@@ -155,7 +155,9 @@ export async function POST(request) {
             4. A resolution that teaches a lesson related to the theme
             5. A happy ending
             
-            The story must be divided into exactly 8 pages (including the introduction and ending).
+            The story must be divided into exactly 5 pages total:
+            - 1 cover page
+            - 4 story pages
             
             Format the response as a JSON object with the following format:
             {
@@ -167,7 +169,7 @@ export async function POST(request) {
                   "content": "Text for page 1",
                   "imageDescription": "Detailed description to generate an illustration for this page"
                 },
-                ...more pages...
+                ...3 more pages...
               ]
             }
             
@@ -229,12 +231,12 @@ export async function POST(request) {
       }));
 
       console.log(
-        `[${requestId}] 📚 Story generated with title: "${storyData.title}" (${storyData.pages.length} pages)`
+        `[${requestId}] 📚 Story generated with title: "${storyData.title}" (${storyData.pages.length} story pages + 1 cover page)`
       );
 
       // Return the story data
       console.log(
-        `[${requestId}] ✅ Story generation task completed successfully`
+        `[${requestId}] ✅ Story generation task completed successfully (5 pages total)`
       );
       return Response.json(storyData);
     } catch (apiError) {

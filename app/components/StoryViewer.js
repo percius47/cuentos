@@ -199,7 +199,7 @@ export default function StoryViewer({ storyData }) {
       // Helper function to load an image
       const loadImage = (url) => {
         return new Promise((resolve, reject) => {
-          const img = new Image();
+          const img = new window.Image(); // Use native Image constructor
           img.crossOrigin = "Anonymous"; // Handle CORS issues
           img.onload = () => resolve(img);
           img.onerror = (e) => reject(e);
@@ -431,28 +431,25 @@ export default function StoryViewer({ storyData }) {
                 pdf.setFont("helvetica", "normal");
               }
 
-              pdf.setFontSize(36); // 36pt font size
+              pdf.setFontSize(24); // Reduced font size for better fit
               pdf.setTextColor("#3e253d"); // Dark purple
-
-              // Set letter spacing by splitting the content into characters with additional space
-              const content = page.pageData.content;
 
               // Split text into lines to fit width
               const splitText = pdf.splitTextToSize(
-                content,
-                maxWidth - 40 // Reduce width slightly to accommodate letter spacing
+                page.pageData.content,
+                maxWidth - 40 // Reduce width slightly to accommodate margins
               );
 
-              // Left-aligned text (x position is left margin)
+              // Add text with proper spacing
               pdf.text(splitText, margin + 20, textY, {
                 align: "left",
-                charSpace: 0.5, // Add letter spacing for better readability
+                lineHeightFactor: 1.5, // Add line spacing for better readability
               });
 
               // Add page number at bottom center
               pdf.setFontSize(14);
               pdf.text(
-                i.toString(), // Page number (cover is page 0)
+                (i + 1).toString(), // Page number (1-based)
                 pdf.internal.pageSize.getWidth() / 2,
                 pdf.internal.pageSize.getHeight() - 20,
                 { align: "center" }

@@ -14,19 +14,18 @@ export function createCharacterProfilePrompt(characterName) {
   return `Create a detailed character profile for a children's book protagonist named ${characterName}. 
 The profile must include EXHAUSTIVE details to ensure consistency across all illustrations.
 
-Physical attributes (be extremely specific):
+Physical attributes (be extremely specific but child-friendly):
 - Age: Exact age (e.g., "7-year-old")
-- Gender/presentation: How the character presents
-- Ethnicity/skin tone: Detailed description of skin color and tone
+- Appearance: How the character looks (e.g., "friendly face with rosy cheeks")
 - Hair: Exact color, length, style, texture (e.g., "sandy brown hair in a neat undercut")
-- Eyes: Shape, color, distinctive features (e.g., "almond-shaped hazel eyes")
-- Face shape: Detailed description of facial structure
-- Body type: Build, height relative to age
-- Distinctive features: Any unique marks, freckles, dimples, etc.
+- Eyes: Shape, color, distinctive features (e.g., "bright, cheerful hazel eyes")
+- Face: Detailed description of facial features (e.g., "round face with a warm smile")
+- Body: Build, height relative to age (e.g., "average height for age, slim build")
+- Special features: Any unique marks, freckles, dimples, etc.
 
 Clothing and accessories (provide exact details):
 - Main outfit: All clothing items with exact colors and style
-- Signature items: Any accessories or items always worn
+- Special items: Any accessories or items always worn
 - Color palette: Consistent color scheme for the character
 
 Include 3-5 unique, memorable features that make this character instantly recognizable and should appear in EVERY illustration.
@@ -142,7 +141,7 @@ export function createPageImagePrompt(
   const consistentCharacterPrompt =
     formatConsistentCharacterPrompt(characterProfile);
 
-  return `Create an illustration for page ${pageNumber} of a children's story-book ${styleDescription}.
+  return `Create a child-friendly illustration for page ${pageNumber} of a children's story-book ${styleDescription}.
 
 Scene description:
 ${imageDescription}
@@ -150,10 +149,12 @@ ${imageDescription}
 ${consistentCharacterPrompt}
 
 CRITICAL REQUIREMENTS:
-1. Do NOT include ANY text in the illustration
-2. NO words, lettering, labels, or text elements of any kind should appear
-3. Create a direct illustration, NOT a photograph or meta-representation of a book
-4. Character ${mainCharacter} MUST match EXACTLY the character profile above with no deviations
+1. Create a child-friendly, positive, and engaging illustration
+2. Do NOT include ANY text in the illustration
+3. NO words, lettering, labels, or text elements of any kind should appear
+4. Create a direct illustration, NOT a photograph or meta-representation of a book
+5. Character ${mainCharacter} MUST match EXACTLY the character profile above with no deviations
+6. Keep all content appropriate for children
 ${
   additionalInstructions
     ? `\nADDITIONAL INSTRUCTIONS:\n${additionalInstructions}`

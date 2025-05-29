@@ -19,10 +19,21 @@ const openai = new OpenAI({
 const BATCH_SIZE = 5; // Maximum images per batch
 const BATCH_DELAY = 62000; // Wait ~62 seconds between batches (just over 1 minute)
 
+// Add these helper functions at the top of the file after the imports
+function sanitizePrompt(prompt) {
+  // Remove potentially problematic content
+  return prompt
+    .replace(/violent|explicit|graphic|inappropriate/gi, "gentle")
+    .replace(/kill|harm|hurt|weapon/gi, "interact with")
+    .replace(/blood|gore|death/gi, "")
+    .replace(/scary|frightening|terrifying/gi, "exciting")
+    .replace(/dark|gloomy|depressing/gi, "mysterious");
+}
+
 // Add a helper function for retrying image generation
-async function generateImageWithRetry(requestId, prompt, maxRetries = 2) {
+async function generateImageWithRetry(requestId, prompt, maxRetries = 3) {
   let attempt = 0;
-  let error;
+  let lastError = null;
 
   while (attempt < maxRetries) {
     attempt++;
@@ -31,23 +42,29 @@ async function generateImageWithRetry(requestId, prompt, maxRetries = 2) {
         `[${requestId}] Attempt ${attempt}/${maxRetries} for image generation`
       );
 
+      // Sanitize the prompt before each attempt
+      const sanitizedPrompt = sanitizePrompt(prompt);
+
       const response = await openai.images.generate({
         model: "dall-e-3",
-        prompt: prompt,
+        prompt: sanitizedPrompt,
         n: 1,
         size: "1024x1024",
+        quality: "standard",
+        style: "vivid",
       });
 
       return response.data[0].url;
-    } catch (err) {
-      error = err;
+    } catch (error) {
+      lastError = error;
       console.error(
-        `[${requestId}] ❌ Attempt ${attempt} failed: ${err.message}`
+        `[${requestId}] ❌ Attempt ${attempt} failed:`,
+        error.message
       );
 
       // If we have more attempts, wait before retrying
       if (attempt < maxRetries) {
-        const delay = 3000 * attempt; // Progressive backoff
+        const delay = 2000 * attempt; // Progressive backoff
         console.log(
           `[${requestId}] Waiting ${delay / 1000} seconds before retry...`
         );
@@ -56,8 +73,9 @@ async function generateImageWithRetry(requestId, prompt, maxRetries = 2) {
     }
   }
 
-  // If we get here, all attempts failed
-  throw error || new Error("Failed to generate image after multiple attempts");
+  throw (
+    lastError || new Error("Failed to generate image after multiple attempts")
+  );
 }
 
 // Add a helper function for downloading images with retry
@@ -217,7 +235,7 @@ export async function POST(request) {
 
       Please include:
       1. A cover description that showcases ${mainCharacter} and captures the story's essence
-      2. 8 pages of story, where each page has:
+      2. 4 pages of story (5 pages total including cover), where each page has:
          - The actual story text that would appear on the page
          - A detailed visual description of what should be illustrated on that page (setting, character positions, actions, mood, colors, etc.)
       
@@ -230,7 +248,7 @@ export async function POST(request) {
             "content": "The text that would appear on page 1",
             "imageDescription": "Detailed visual description for page 1's illustration"
           },
-          // Pages 2-8 following the same structure
+          // Pages 2-4 following the same structure
         ]
       }
       Make sure character visual details stay consistent with the profile. The illustrations should be visually rich and varied from page to page. IMAGE SHOULD ABSOLUTELY NOT CONTAIN ANY TEXT.`;
@@ -294,17 +312,11 @@ export async function POST(request) {
     );
 
     try {
-      // Generate the cover image
-      const coverImageResponse = await openai.images.generate({
-        model: "dall-e-3",
-        prompt: coverPrompt,
-        n: 1,
-        size: "1024x1024",
-        quality: "standard",
-        style: "vivid",
-      });
-
-      const coverImageUrl = coverImageResponse.data[0].url;
+      // Generate the cover image with retry logic
+      const coverImageUrl = await generateImageWithRetry(
+        requestId,
+        coverPrompt
+      );
 
       // Download the cover image
       const coverImageFetchResponse = await fetch(coverImageUrl);
@@ -343,17 +355,11 @@ export async function POST(request) {
         );
 
         try {
-          // Generate the page image
-          const pageImageResponse = await openai.images.generate({
-            model: "dall-e-3",
-            prompt: pagePrompt,
-            n: 1,
-            size: "1024x1024",
-            quality: "standard",
-            style: "vivid",
-          });
-
-          const pageImageUrl = pageImageResponse.data[0].url;
+          // Generate the page image with retry logic
+          const pageImageUrl = await generateImageWithRetry(
+            requestId,
+            pagePrompt
+          );
 
           // Download the page image
           const pageImageFetchResponse = await fetch(pageImageUrl);
@@ -377,7 +383,7 @@ export async function POST(request) {
 
           // Add rate limiting delay between generations
           if (i < storyData.pages.length - 1) {
-            await new Promise((resolve) => setTimeout(resolve, 1000));
+            await new Promise((resolve) => setTimeout(resolve, 2000)); // Increased delay to 2 seconds
           }
         } catch (error) {
           console.error(
